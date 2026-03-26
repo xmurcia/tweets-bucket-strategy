@@ -1,0 +1,5 @@
+{
+  "name": "Polymarket Bucket Strategy",
+  "description": "Calculate and select betting strategies for Polymarket categorical markets, specifically focused on Elon Musk weekly buckets.",
+  "requestFramePermissions": []
+}
