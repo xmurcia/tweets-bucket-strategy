@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { MarketSelector } from './components/MarketSelector';
 import { BucketList } from './components/BucketList';
 import { BetCalculator } from './components/BetCalculator';
-import { PolymarketEvent, Bucket } from './types';
+import { PolymarketEvent } from './types';
 import { parseBuckets, getTrackingStats, getActiveCounts, TrackingStats } from './services/polymarket';
 import { motion, AnimatePresence } from 'motion/react';
 import { ArrowLeft, Info, TrendingUp } from 'lucide-react';

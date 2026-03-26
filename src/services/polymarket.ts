@@ -8,13 +8,13 @@ export async function searchMarkets(query: string): Promise<PolymarketEvent[]> {
     
     // Filtrado estricto por TÍTULO del evento: "elon" y "tweets"
     return data
-      .filter((e: any) => {
+      .filter((e: PolymarketEvent) => {
         const title = e.title.toLowerCase();
         return title.includes('elon') && title.includes('tweets');
       })
-      .map((e: any) => ({
+      .map((e: PolymarketEvent) => ({
         ...e,
-        trackingId: e.trackingId || e.markets?.[0]?.trackingId
+        trackingId: e.trackingId || (e.markets?.[0] as unknown as Record<string, string>)?.trackingId
       }));
   } catch (error) {
     console.error('Error searching events:', error);
@@ -41,7 +41,7 @@ export async function getActiveCounts(): Promise<TrackingStats[]> {
     const rawData = json.data || [];
     const trackings = Array.isArray(rawData) ? rawData : (rawData.trackings || []);
     
-    const statsPromises = trackings.map(async (d: any) => {
+    const statsPromises = trackings.map(async (d: { id: string; title?: string }) => {
       const stats = await getTrackingStats(d.id);
       if (stats) {
         return {
@@ -76,12 +76,12 @@ export async function getTrackingStats(trackingId: string): Promise<TrackingStat
     if (typeof metricsObj === 'string') {
       try {
         metricsObj = JSON.parse(metricsObj);
-      } catch (e) {
+      } catch {
         metricsObj = {};
       }
     }
     const metrics = metricsObj.stats || metricsObj;
-    const total = metrics.total ?? metrics.count ?? metrics.current ?? metrics.currentValue ?? metrics.value ?? d.total ?? d.count ?? d.current ?? d.currentValue ?? d.value ?? d.target ?? d.targetValue ?? d.value ?? Number(d.metrics) ?? 0;
+    const total = metrics.total ?? metrics.count ?? metrics.current ?? metrics.currentValue ?? metrics.value ?? d.total ?? d.count ?? d.current ?? d.currentValue ?? d.value ?? d.target ?? d.targetValue ?? (Number(d.metrics) || 0);
     const daysElapsed = metrics.daysElapsed ?? d.daysElapsed ?? calculatedDaysElapsed;
     
     return {
@@ -118,7 +118,7 @@ export function parseBuckets(event: PolymarketEvent): Bucket[] {
         const rangeMatch = q.match(/(\d+)-(\d+)/);
         const plusMatch = q.match(/(\d+)\+/);
         
-        let bucketName = "";
+        let bucketName: string;
         if (rangeMatch) {
           bucketName = rangeMatch[0];
         } else if (plusMatch) {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { searchMarkets, getActiveCounts, TrackingStats } from '../services/polymarket';
+import { searchMarkets, TrackingStats } from '../services/polymarket';
 import { PolymarketEvent } from '../types';
 import { Loader2 } from 'lucide-react';
 
