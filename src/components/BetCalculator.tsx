@@ -1,7 +1,6 @@
 import React, { useMemo } from 'react';
 import { Bucket } from '../types';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
-import { cn } from '../lib/utils';
 
 interface BetCalculatorProps {
   selectedBuckets: Bucket[];
@@ -14,6 +13,9 @@ export function BetCalculator({ selectedBuckets, budget, onBudgetChange }: BetCa
     if (selectedBuckets.length === 0) return null;
 
     const totalUnitCost = selectedBuckets.reduce((sum, b) => sum + b.price, 0);
+    if (totalUnitCost === 0) {
+      return { totalUnitCost: 0, sharesPerBucket: 0, potentialPayout: 0, profit: 0, roi: 0, coverage: 0 };
+    }
     const sharesPerBucket = budget / totalUnitCost;
     const potentialPayout = sharesPerBucket; // Each share pays $1 if it wins
     const profit = potentialPayout - budget;
@@ -43,12 +45,13 @@ export function BetCalculator({ selectedBuckets, budget, onBudgetChange }: BetCa
     <div className="space-y-6">
       <div className="border border-ink p-6 space-y-4">
         <div className="space-y-2">
-          <label className="font-mono text-[10px] uppercase tracking-widest opacity-50">Investment Budget ($)</label>
+          <label htmlFor="budget-input" className="font-mono text-[10px] uppercase tracking-widest opacity-50">Investment Budget ($)</label>
           <input
+            id="budget-input"
             type="number"
             value={budget}
             onChange={(e) => onBudgetChange(parseFloat(e.target.value) || 0)}
-            className="w-full bg-transparent border-b border-ink py-2 font-mono text-2xl focus:outline-none"
+            className="w-full bg-transparent border-b border-ink py-2 font-mono text-2xl focus:outline-none focus:border-b-2"
           />
         </div>
 
@@ -60,8 +63,8 @@ export function BetCalculator({ selectedBuckets, budget, onBudgetChange }: BetCa
             </div>
             <div className="space-y-1">
               <span className="font-mono text-[10px] uppercase opacity-50">Net Profit</span>
-              <div className={cn("text-xl font-medium", stats.profit > 0 ? "text-green-700" : "text-red-700")}>
-                ${stats.profit.toFixed(2)}
+              <div className="text-xl font-medium text-ink">
+                {stats.profit > 0 ? '+' : ''}{stats.profit < 0 ? '−' : ''}${Math.abs(stats.profit).toFixed(2)}
               </div>
             </div>
             <div className="space-y-1">
@@ -98,8 +101,9 @@ export function BetCalculator({ selectedBuckets, budget, onBudgetChange }: BetCa
                   />
                 ))}
               </Pie>
-              <Tooltip 
-                contentStyle={{ backgroundColor: '#E4E3E0', border: '1px solid #141414', fontFamily: 'monospace', fontSize: '10px' }}
+              <Tooltip
+                contentStyle={{ backgroundColor: 'var(--bg)', border: '1px solid var(--ink)', color: 'var(--ink)', fontFamily: 'monospace', fontSize: '11px' }}
+                formatter={(value: number) => [(value * 100).toFixed(1) + '%', '']}
               />
             </PieChart>
           </ResponsiveContainer>

@@ -1,4 +1,4 @@
-import { PolymarketEvent, Bucket } from '../types';
+import { PolymarketEvent, Bucket, TweetProjection, ProjectionInsufficient } from '../types';
 
 export async function searchMarkets(query: string): Promise<PolymarketEvent[]> {
   try {
@@ -68,9 +68,12 @@ export async function getTrackingStats(trackingId: string): Promise<TrackingStat
     const d = json.data || {};
     
     const now = new Date();
-    const startDate = new Date(d.startDate);
-    const elapsedMs = now.getTime() - startDate.getTime();
-    const calculatedDaysElapsed = Math.max(0, elapsedMs / (1000 * 60 * 60 * 24));
+    let calculatedDaysElapsed = 0;
+    if (d.startDate) {
+      const startDate = new Date(d.startDate);
+      const elapsedMs = now.getTime() - startDate.getTime();
+      calculatedDaysElapsed = Math.max(0, elapsedMs / (1000 * 60 * 60 * 24));
+    }
     
     let metricsObj = d.metrics || d.stats || {};
     if (typeof metricsObj === 'string') {
@@ -81,15 +84,18 @@ export async function getTrackingStats(trackingId: string): Promise<TrackingStat
       }
     }
     const metrics = metricsObj.stats || metricsObj;
-    const total = metrics.total ?? metrics.count ?? metrics.current ?? metrics.currentValue ?? metrics.value ?? d.total ?? d.count ?? d.current ?? d.currentValue ?? d.value ?? d.target ?? d.targetValue ?? (Number(d.metrics) || 0);
+    const total = metrics.total ?? metrics.count ?? metrics.current ?? metrics.currentValue ?? metrics.value ?? d.stats?.total ?? d.stats?.cumulative ?? d.total ?? d.count ?? d.current ?? d.currentValue ?? d.value ?? d.target ?? d.targetValue ?? 0;
+    if (total === 0) {
+      console.warn(`[getTrackingStats] No well-known field yielded a number above 0 for trackingId: ${trackingId}`);
+    }
     const daysElapsed = metrics.daysElapsed ?? d.daysElapsed ?? calculatedDaysElapsed;
     
     return {
       id: trackingId,
       total,
       daysElapsed,
-      startDate: d.startDate,
-      endDate: d.endDate
+      startDate: d.startDate ?? "",
+      endDate: d.endDate ?? ""
     };
   } catch (error) {
     console.error('Error fetching tracking stats:', error);
@@ -125,7 +131,7 @@ export function parseBuckets(event: PolymarketEvent): Bucket[] {
           bucketName = plusMatch[0];
         } else {
           // Si no hay rango claro, usamos la pregunta simplificada
-          bucketName = q.replace(/Will Elon Musk tweet | times\?|/gi, '').trim();
+          bucketName = q.replace(/Will Elon Musk tweet |times\?/gi, '').trim();
         }
 
         allBuckets.push({
@@ -157,5 +163,44 @@ export function parseBuckets(event: PolymarketEvent): Bucket[] {
   } catch (e) {
     console.error('Error parsing buckets from event:', e);
     return [];
+  }
+}
+
+export async function getTweetProjection(trackingId: string): Promise<TweetProjection | ProjectionInsufficient | null> {
+  try {
+    const response = await fetch(`/api/polymarket/tweet-projection/${trackingId}`);
+    if (response.status === 404) {
+      const body = await response.json().catch(() => ({}));
+      if (body.error === 'Insufficient data for projection') {
+        return { insufficient: true, hoursElapsed: body.hoursElapsed ?? 0, currentCount: body.currentCount ?? 0 };
+      }
+      return null;
+    }
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data as TweetProjection;
+  } catch (error) {
+    console.error('Error fetching tweet projection:', error);
+    return null;
+  }
+}
+
+export async function getTweetProjectionByDate(endDate: string, slug?: string): Promise<TweetProjection | ProjectionInsufficient | null> {
+  try {
+    const params = new URLSearchParams({ endDate });
+    if (slug) params.set('slug', slug);
+    const response = await fetch(`/api/polymarket/tweet-projection-by-date?${params.toString()}`);
+    if (response.status === 404) {
+      const body = await response.json().catch(() => ({}));
+      if (body.error === 'Insufficient data for projection') {
+        return { insufficient: true, hoursElapsed: body.hoursElapsed ?? 0, currentCount: body.currentCount ?? 0 };
+      }
+      return null;
+    }
+    if (!response.ok) return null;
+    return await response.json() as TweetProjection;
+  } catch (error) {
+    console.error('Error fetching tweet projection by date:', error);
+    return null;
   }
 }

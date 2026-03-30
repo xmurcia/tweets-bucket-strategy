@@ -1,12 +1,13 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { MarketSelector } from './components/MarketSelector';
 import { BucketList } from './components/BucketList';
 import { BetCalculator } from './components/BetCalculator';
-import { PolymarketEvent } from './types';
-import { parseBuckets, getTrackingStats, getActiveCounts, TrackingStats } from './services/polymarket';
+import { PolymarketEvent, TweetProjection, ProjectionInsufficient } from './types';
+import { parseBuckets, getTrackingStats, getActiveCounts, getTweetProjection, getTweetProjectionByDate, TrackingStats } from './services/polymarket';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowLeft, Info, TrendingUp } from 'lucide-react';
+import { ArrowLeft, Info, TrendingUp, Sun, Moon, Copy } from 'lucide-react';
 import { StatsModule } from './components/StatsModule';
+import { StrategyTabs } from './components/StrategyTabs';
 
 export default function App() {
   const [selectedMarket, setSelectedMarket] = useState<PolymarketEvent | null>(null);
@@ -14,6 +15,27 @@ export default function App() {
   const [budget, setBudget] = useState<number>(100);
   const [currentStats, setCurrentStats] = useState<TrackingStats | null>(null);
   const [activeCounts, setActiveCounts] = useState<TrackingStats[]>([]);
+  const [tweetProjection, setTweetProjection] = useState<TweetProjection | null>(null);
+  const [projectionInsufficient, setProjectionInsufficient] = useState<ProjectionInsufficient | null>(null);
+  const [dark, setDark] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const autoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const TIPS_ADDRESS = '0x137789060E41030417b7835B6647EFe9b712F6F3';
+  const truncatedAddress = `${TIPS_ADDRESS.slice(0, 6)}...${TIPS_ADDRESS.slice(-4)}`;
+
+  const handleCopyAddress = () => {
+    navigator.clipboard.writeText(TIPS_ADDRESS).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  const toggleTheme = () => {
+    const next = !dark;
+    setDark(next);
+    document.documentElement.classList.toggle('dark', next);
+  };
 
   const buckets = useMemo(() => {
     return selectedMarket ? parseBuckets(selectedMarket) : [];
@@ -42,20 +64,79 @@ export default function App() {
     loadActiveCounts();
   }, []);
 
+  const refreshMarketData = React.useCallback(async (market: PolymarketEvent) => {
+    const counts = await getActiveCounts();
+    setActiveCounts(counts);
+    const preFetched = counts.find(s => s.id === market.trackingId);
+    if (preFetched) {
+      setCurrentStats(preFetched);
+    } else if (market.trackingId) {
+      const stats = await getTrackingStats(market.trackingId);
+      setCurrentStats(stats);
+    }
+    const result = market.trackingId
+      ? await getTweetProjection(market.trackingId)
+      : market.endDate
+        ? await getTweetProjectionByDate(market.endDate, market.slug)
+        : null;
+    if (result && 'insufficient' in result) {
+      setProjectionInsufficient(result);
+      setTweetProjection(null);
+    } else {
+      setTweetProjection(result as TweetProjection | null);
+      setProjectionInsufficient(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!selectedMarket) {
+      if (autoRefreshRef.current !== null) {
+        clearInterval(autoRefreshRef.current);
+        autoRefreshRef.current = null;
+      }
+      return;
+    }
+    const marketSnapshot = selectedMarket;
+    autoRefreshRef.current = setInterval(() => {
+      refreshMarketData(marketSnapshot);
+    }, 300000);
+    return () => {
+      if (autoRefreshRef.current !== null) {
+        clearInterval(autoRefreshRef.current);
+        autoRefreshRef.current = null;
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMarket?.id]);
+
   const handleMarketSelect = async (market: PolymarketEvent) => {
     setSelectedMarket(market);
     setSelectedBucketIds(new Set());
-    
+    setTweetProjection(null);
+    setProjectionInsufficient(null);
+
     // Try to find stats in pre-fetched activeCounts
     const preFetched = activeCounts.find(s => s.id === market.trackingId);
     if (preFetched) {
       setCurrentStats(preFetched);
     } else if (market.trackingId) {
-      // Fallback to individual fetch
       const stats = await getTrackingStats(market.trackingId);
       setCurrentStats(stats);
     } else {
       setCurrentStats(null);
+    }
+
+    // Fetch tweet projection: by trackingId if available, otherwise match by event endDate
+    const result = market.trackingId
+      ? await getTweetProjection(market.trackingId)
+      : market.endDate
+        ? await getTweetProjectionByDate(market.endDate, market.slug)
+        : null;
+
+    if (result && 'insufficient' in result) {
+      setProjectionInsufficient(result);
+    } else {
+      setTweetProjection(result);
     }
   };
 
@@ -64,10 +145,19 @@ export default function App() {
       <header className="mb-12 md:mb-20 space-y-4">
         <div className="flex justify-between items-baseline">
           <h1 className="text-5xl md:text-7xl font-serif italic tracking-tighter">
-            Bucket <span className="not-italic font-sans font-bold uppercase text-2xl md:text-4xl tracking-normal">Strategy</span>
+            Musk <span className="not-italic font-sans font-bold uppercase text-2xl md:text-4xl tracking-normal">Oracle</span>
           </h1>
-          <div className="font-mono text-[10px] uppercase tracking-widest opacity-50">
-            Polymarket Analysis Tool v1.3
+          <div className="flex items-center gap-4">
+            <div className="font-mono text-[10px] uppercase tracking-widest opacity-50">
+              Polymarket Analysis Tool v1.3
+            </div>
+            <button
+              onClick={toggleTheme}
+              aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+              className="p-2 border border-ink/20 hover:bg-ink hover:text-bg transition-colors focus:outline-none focus:ring-2 focus:ring-ink"
+            >
+              {dark ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+            </button>
           </div>
         </div>
         <div className="h-px bg-ink w-full" />
@@ -84,7 +174,7 @@ export default function App() {
               className="space-y-8"
             >
               <div className="flex items-center gap-4 text-ink/60">
-                <Info className="w-4 h-4" />
+                <Info className="w-4 h-4" aria-hidden="true" />
                 <p className="font-serif italic text-lg">
                   Select an active categorical event to begin analyzing bucket coverage strategies.
                 </p>
@@ -107,46 +197,174 @@ export default function App() {
                 <div className="flex items-center gap-4">
                   <button
                     onClick={() => setSelectedMarket(null)}
-                    className="p-2 border border-ink/20 hover:bg-ink hover:text-bg transition-colors"
+                    className="p-2 border border-ink/20 hover:bg-ink hover:text-bg transition-colors focus:outline-none focus:ring-2 focus:ring-ink"
+                    aria-label="Go back to market selection"
                   >
-                    <ArrowLeft className="w-4 h-4" />
+                    <ArrowLeft className="w-4 h-4" aria-hidden="true" />
                   </button>
                   <div className="flex-1">
                     <h2 className="text-2xl md:text-4xl font-serif italic leading-tight">
                       {selectedMarket.title}
                     </h2>
-                    {currentStats && (
-                      <div className="mt-2 flex items-center gap-2">
-                        <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                        <span className="font-mono text-sm font-bold uppercase tracking-wider">
-                          Live: {currentStats.total.toLocaleString()} tweets
-                        </span>
-                      </div>
-                    )}
+                    {(currentStats || tweetProjection || projectionInsufficient) && (() => {
+                      const startDate = currentStats?.startDate || tweetProjection?.periodStart;
+                      const started = !startDate || new Date(startDate) <= new Date();
+                      if (!started) return (
+                        <div className="mt-2 flex items-center gap-2" aria-live="polite">
+                          <span className="font-mono text-sm uppercase tracking-wider opacity-50">
+                            Starts {new Date(startDate!).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                      );
+                      if (projectionInsufficient) return (
+                        <div className="mt-2 flex items-center gap-2" aria-live="polite">
+                          <span className="w-2 h-2 rounded-full animate-pulse bg-warning" aria-hidden="true" />
+                          <span className="font-mono text-sm font-bold uppercase tracking-wider text-warning">
+                            Warmup — {projectionInsufficient.currentCount.toLocaleString()} tweets
+                          </span>
+                        </div>
+                      );
+                      return null;
+                    })()}
                   </div>
                 </div>
 
-                {currentStats && (
+                {(currentStats || tweetProjection || projectionInsufficient) && (() => {
+                  const startDate = currentStats?.startDate || tweetProjection?.periodStart;
+                  const started = !startDate || new Date(startDate) <= new Date();
+                  if (!started) return null;
+                  if (projectionInsufficient) return (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.2 }}
+                      className="border border-warning/40 p-4 flex items-center gap-3"
+                    >
+                      <span className="relative flex h-2.5 w-2.5 shrink-0">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-warning"></span>
+                      </span>
+                      <div>
+                        <span className="font-mono text-[10px] uppercase tracking-widest text-warning block">Not enough reliable data</span>
+                        <span className="font-mono text-xs opacity-60">
+                          {projectionInsufficient.currentCount} tweets in {Math.max(0, projectionInsufficient.hoursElapsed).toFixed(1)}h — projections available after 4h / 20 tweets
+                        </span>
+                      </div>
+                    </motion.div>
+                  );
+                  return (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.2 }}
+                      className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch"
+                    >
+                      <div className="lg:col-span-2">
+                        <StatsModule
+                          stats={currentStats ?? { id: tweetProjection!.trackingId, total: tweetProjection!.currentCount, daysElapsed: tweetProjection!.hoursElapsed / 24, startDate: tweetProjection!.periodStart, endDate: tweetProjection!.periodEnd }}
+                          tweetProjection={tweetProjection}
+                          buckets={buckets}
+                        />
+                      </div>
+                      <div className="flex flex-col justify-between h-full gap-4">
+                        {tweetProjection && tweetProjection.rangeProbabilities.length > 0 && (
+                          <div className="p-4 border border-ink/10 space-y-3">
+                            <span className="font-mono text-[10px] uppercase tracking-widest opacity-50 block">Top projected buckets</span>
+                            <div className="space-y-2">
+                              {[...tweetProjection.rangeProbabilities]
+                                .sort((a, b) => b.probability - a.probability)
+                                .slice(0, 3)
+                                .map((rp, i) => (
+                                  <div key={rp.range} className="flex items-center gap-2">
+                                    <span className="font-mono text-[10px] opacity-30 w-3">{i + 1}</span>
+                                    <div className="flex-1">
+                                      <div className="flex justify-between mb-0.5">
+                                        <span className="font-mono text-xs font-bold">{rp.range}</span>
+                                        <span className="font-mono text-xs">{(rp.probability * 100).toFixed(1)}%</span>
+                                      </div>
+                                      <div className="w-full bg-ink/10 h-1">
+                                        <div className="bg-ink h-full" style={{ width: `${Math.min(100, rp.probability * 100)}%` }} />
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        )}
+                        <div className="p-4 border border-dashed border-ink/20 space-y-3">
+                          <h4 className="font-mono text-[10px] uppercase tracking-widest">Support the analyst</h4>
+                          {selectedMarket.slug && (
+                            <a
+                              href={`https://polymarket.com/event/${selectedMarket.slug}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block font-mono text-[10px] uppercase tracking-widest opacity-50 hover:opacity-100 hover:underline transition-opacity"
+                            >
+                              View on Polymarket →
+                            </a>
+                          )}
+                          <a
+                            href="https://polymarket.com/@polete"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="group flex items-center justify-between gap-2 rounded-sm border border-ink bg-ink text-bg px-3 py-2 font-mono text-[10px] uppercase tracking-widest transition-colors hover:bg-bg hover:text-ink focus:outline-none focus:ring-2 focus:ring-ink"
+                          >
+                            <span className="flex flex-col gap-0.5">
+                              <span>@polete on Polymarket</span>
+                              <span className="normal-case text-[9px] tracking-wide opacity-80">Leave me a tip on Polymarket</span>
+                            </span>
+                            <span aria-hidden="true">→</span>
+                          </a>
+                          <div className="rounded-md border border-ink/30 bg-ink text-bg p-3 space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-mono text-[10px] uppercase tracking-widest block opacity-80">Tips (Polygon USDC)</span>
+                              <span className="font-mono text-[9px] uppercase tracking-widest border border-bg/30 px-1.5 py-0.5">Wallet</span>
+                            </div>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-mono text-xs tracking-wide" title={TIPS_ADDRESS}>{truncatedAddress}</span>
+                              <button
+                                onClick={handleCopyAddress}
+                                aria-label="Copy wallet address"
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-bg/30 bg-bg text-ink hover:bg-transparent hover:text-bg transition-colors focus:outline-none focus:ring-2 focus:ring-bg"
+                              >
+                                {copied ? (
+                                  <span className="font-mono text-[9px] uppercase tracking-widest">Copied!</span>
+                                ) : (
+                                  <>
+                                    <Copy className="w-3 h-3" aria-hidden="true" />
+                                    <span className="font-mono text-[9px] uppercase tracking-widest">Copy</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })()}
+
+                {buckets.length > 0 && (
                   <motion.div
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.2 }}
+                    transition={{ delay: 0.3 }}
+                    className="border border-ink/10 p-6"
                   >
-                    <StatsModule stats={currentStats} />
+                    <StrategyTabs
+                      buckets={buckets}
+                      tweetProjection={tweetProjection}
+                      budget={budget}
+                      onApplyStrategy={setSelectedBucketIds}
+                    />
                   </motion.div>
                 )}
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
                   <div className="lg:col-span-2 space-y-8">
-                    <div className="bg-white/50 border border-ink/5 p-4 rounded-sm">
-                      <p className="text-sm text-ink/70 leading-relaxed">
-                        {selectedMarket.description}
-                      </p>
-                    </div>
-
                     <div className="space-y-4">
                       <div className="flex items-center gap-2">
-                        <TrendingUp className="w-4 h-4 opacity-40" />
+                        <TrendingUp className="w-4 h-4 opacity-40" aria-hidden="true" />
                         <h3 className="font-mono text-xs uppercase tracking-[0.2em] opacity-50">Available Buckets</h3>
                       </div>
                       <BucketList
@@ -187,8 +405,8 @@ export default function App() {
                                     return (
                                       <div key={b.id} className="flex justify-between text-[10px] font-mono">
                                         <span>{b.name}</span>
-                                        <span className={diff > 0 ? "text-blue-600" : "text-green-600"}>
-                                          {diff > 0 ? `+${diff} needed` : "Passed"}
+                                        <span className="text-ink">
+                                          {diff > 0 ? `+${diff} needed` : "✓ Passed"}
                                         </span>
                                       </div>
                                     );
@@ -202,6 +420,45 @@ export default function App() {
                             Select buckets to see viability analysis.
                           </p>
                         )}
+                      </div>
+
+                      <div className="mt-8 p-4 border border-dashed border-ink/20 rounded-sm space-y-3">
+                        <h4 className="font-mono text-[10px] uppercase tracking-widest">Support the analyst</h4>
+                        <a
+                          href="https://polymarket.com/@polete"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="group flex items-center justify-between gap-2 rounded-sm border border-ink bg-ink text-bg px-3 py-2 font-mono text-[10px] uppercase tracking-widest transition-colors hover:bg-bg hover:text-ink focus:outline-none focus:ring-2 focus:ring-ink"
+                        >
+                          <span className="flex flex-col gap-0.5">
+                            <span>@polete on Polymarket</span>
+                            <span className="normal-case text-[9px] tracking-wide opacity-80">Leave me a tip on Polymarket</span>
+                          </span>
+                          <span aria-hidden="true">→</span>
+                        </a>
+                        <div className="rounded-md border border-ink/30 bg-ink text-bg p-3 space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-mono text-[10px] uppercase tracking-widest block opacity-80">Tips (Polygon USDC)</span>
+                            <span className="font-mono text-[9px] uppercase tracking-widest border border-bg/30 px-1.5 py-0.5">Wallet</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-mono text-xs tracking-wide" title={TIPS_ADDRESS}>{truncatedAddress}</span>
+                            <button
+                              onClick={handleCopyAddress}
+                              aria-label="Copy wallet address"
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-bg/30 bg-bg text-ink hover:bg-transparent hover:text-bg transition-colors focus:outline-none focus:ring-2 focus:ring-bg"
+                            >
+                              {copied ? (
+                                <span className="font-mono text-[9px] uppercase tracking-widest">Copied!</span>
+                              ) : (
+                                <>
+                                  <Copy className="w-3 h-3" aria-hidden="true" />
+                                  <span className="font-mono text-[9px] uppercase tracking-widest">Copy</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </aside>
