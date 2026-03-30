@@ -1,20 +1,68 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Musk Oracle - Polymarket Tweet Bucket Analyzer
 
-# Run and deploy your AI Studio app
+Focused React app to analyze Polymarket markets that predict how many times Elon Musk will tweet during a defined event window.
 
-This contains everything you need to run your app locally.
+## What it does
 
-View your app in AI Studio: https://ai.studio/apps/064ed11b-06c9-4374-b74a-c1f2fcadbcc0
+- Fetches active Polymarket events and filters to Elon tweet-count markets.
+- Parses market outcomes into tweet-count buckets and shows pricing/coverage views.
+- Pulls live tracking stats for `elonmusk` and computes projection ranges/probabilities.
+- Supports quick strategy comparison using projected probabilities vs market prices.
 
-## Run Locally
+## Stack
 
-**Prerequisites:**  Node.js
+- Frontend: React + TypeScript + Vite
+- Server: Express (`server.ts`) with Vite in middleware mode during development
+- Styling: Tailwind CSS v4
+- Data sources (proxied server-side):
+  - `https://gamma-api.polymarket.com`
+  - `https://xtracker.polymarket.com/api`
 
+## Run locally
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+Prerequisite: Node.js
+
+```bash
+npm install
+npm run dev
+```
+
+Lint/type-check:
+
+```bash
+npm run lint
+```
+
+## Environment variables
+
+Use `.env.local` (not `.env`).
+
+- `GEMINI_API_KEY`: currently scaffolded and loaded by Vite, but not used by the app runtime logic.
+- `DISABLE_HMR=true`: optional, only needed in constrained hosted environments.
+
+## Architecture
+
+- Single-page app with top-level state managed in `App.tsx` and passed down via props.
+- Frontend calls only local API routes under `/api/polymarket/*`.
+- Express proxies external requests to avoid browser CORS issues and centralize projection logic.
+
+### Relevant local endpoints
+
+- `GET /api/polymarket/events?query=...`
+- `GET /api/polymarket/active-counts/:userId`
+- `GET /api/polymarket/trackings/:id`
+- `GET /api/polymarket/tweet-projection/:trackingId`
+- `GET /api/polymarket/tweet-projection-by-date?endDate=...&slug=...`
+
+## Projection and calibration notes (short events)
+
+Current projection behavior is tuned to avoid overconfident outputs early in an event:
+
+- Warmup gate: projections are withheld until at least 4 elapsed hours and 20 tweets.
+- Rate calibration: base pace uses elapsed average, with optional blending toward recent 24h pace when stable enough.
+- Dispersion-aware uncertainty: interval width and confidence are adjusted using observed hourly-count dispersion.
+- Distribution choice: range probabilities use Poisson for lower-intensity cases and switch to Normal approximation at higher volume/dispersion.
+
+## Roadmap (next iteration)
+
+- Add product analytics with Plausible to track key usage flows (market selection, strategy tab usage, and refresh behavior).
