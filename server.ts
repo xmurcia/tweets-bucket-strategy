@@ -14,6 +14,287 @@ const BROWSER_HEADERS = {
   'Referer': 'https://polymarket.com/',
 };
 
+type RangeProbability = {
+  range: string;
+  rangeStart: number;
+  rangeEnd: number;
+  probability: number;
+};
+
+const RANGE_SIZE = 20;
+const MAX_RANGE_START = 2000;
+const MIN_HOURS_FOR_PROJECTION = 4;
+const MIN_TWEETS_FOR_PROJECTION = 20;
+
+type HourlySlot = {
+  date: string;
+  count: number;
+};
+
+function erf(x: number): number {
+  const a1 = 0.254829592;
+  const a2 = -0.284496736;
+  const a3 = 1.421413741;
+  const a4 = -1.453152027;
+  const a5 = 1.061405429;
+  const p = 0.3275911;
+  const sign = x < 0 ? -1 : 1;
+  const absX = Math.abs(x);
+  const t = 1.0 / (1.0 + p * absX);
+  const y = 1.0 - ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * Math.exp(-absX * absX);
+  return sign * y;
+}
+
+function normalCdf(x: number, mean: number, std: number): number {
+  return 0.5 * (1 + erf((x - mean) / (std * Math.sqrt(2))));
+}
+
+function clampProbability(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  if (value <= 0) return 0;
+  if (value >= 1) return 1;
+  return value;
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  if (value <= min) return min;
+  if (value >= max) return max;
+  return value;
+}
+
+function estimateDispersion(hourlyCounts: number[]): number {
+  const valid = hourlyCounts.filter((count) => Number.isFinite(count) && count >= 0);
+  if (valid.length < 6) return 1;
+
+  const mean = valid.reduce((sum, count) => sum + count, 0) / valid.length;
+  if (mean <= 0) return 1;
+
+  const variance = valid.reduce((sum, count) => {
+    const diff = count - mean;
+    return sum + diff * diff;
+  }, 0) / valid.length;
+
+  const dispersion = variance / mean;
+  if (dispersion <= 1.2) return 1;
+  return Math.min(2, dispersion);
+}
+
+function buildRangeProbabilities(
+  currentCount: number,
+  projectedTotal: number,
+  tweetsPerHour: number,
+  hoursRemaining: number,
+  hourlyCounts: number[]
+): RangeProbability[] {
+  const expectedRemaining = Math.max(0, tweetsPerHour * hoursRemaining);
+  const lambda = Number.isFinite(expectedRemaining) ? expectedRemaining : 0;
+  const dispersion = estimateDispersion(hourlyCounts);
+
+  const remainingStd = Math.sqrt(Math.max(1, lambda * dispersion));
+  const totalStd = remainingStd;
+  const upperFromDistribution = Math.ceil((projectedTotal + totalStd * 5) / RANGE_SIZE) * RANGE_SIZE;
+  const tailRangeStart = Math.max(RANGE_SIZE, Math.min(MAX_RANGE_START, upperFromDistribution));
+
+  const rangeProbabilities: RangeProbability[] = [];
+
+  const useNormalApproximation = (lambda * dispersion) >= 225 || (dispersion >= 1.35 && lambda >= 120);
+
+  let poissonCdf: number[] = [];
+  let maxPoissonK = -1;
+
+  if (!useNormalApproximation && lambda > 0) {
+    maxPoissonK = Math.max(0, tailRangeStart - 1 - currentCount);
+    poissonCdf = new Array(maxPoissonK + 1);
+    let pmf = Math.exp(-lambda);
+    let cumulative = pmf;
+    poissonCdf[0] = cumulative;
+
+    for (let k = 1; k <= maxPoissonK; k += 1) {
+      pmf = pmf * (lambda / k);
+      cumulative += pmf;
+      poissonCdf[k] = cumulative;
+    }
+  }
+
+  for (let start = 0; start < tailRangeStart; start += RANGE_SIZE) {
+    const end = start + (RANGE_SIZE - 1);
+    let probability = 0;
+
+    if (lambda <= 0) {
+      probability = currentCount >= start && currentCount <= end ? 1 : 0;
+    } else if (useNormalApproximation) {
+      const mean = currentCount + lambda;
+      const std = Math.max(1, totalStd);
+      const lowBound = start - 0.5;
+      const highBound = end + 0.5;
+      probability = normalCdf(highBound, mean, std) - normalCdf(lowBound, mean, std);
+    } else {
+      const startK = Math.max(0, start - currentCount);
+      const endK = end - currentCount;
+
+      if (endK >= 0 && startK <= endK) {
+        const cdfEnd = endK >= maxPoissonK ? 1 : poissonCdf[endK];
+        const cdfStartMinusOne = startK <= 0 ? 0 : poissonCdf[startK - 1];
+        probability = cdfEnd - cdfStartMinusOne;
+      }
+    }
+
+    rangeProbabilities.push({
+      range: `${start}-${end}`,
+      rangeStart: start,
+      rangeEnd: end,
+      probability: clampProbability(probability),
+    });
+  }
+
+  let tailProbability = 0;
+
+  if (lambda <= 0) {
+    tailProbability = currentCount >= tailRangeStart ? 1 : 0;
+  } else if (useNormalApproximation) {
+    const mean = currentCount + lambda;
+    const std = Math.max(1, totalStd);
+    tailProbability = 1 - normalCdf(tailRangeStart - 0.5, mean, std);
+  } else {
+    const tailStartK = tailRangeStart - currentCount;
+    if (tailStartK <= 0) {
+      tailProbability = 1;
+    } else {
+      const index = Math.min(maxPoissonK, tailStartK - 1);
+      const lowerCdf = index >= 0 ? poissonCdf[index] : 0;
+      tailProbability = 1 - lowerCdf;
+    }
+  }
+
+  rangeProbabilities.push({
+    range: `${tailRangeStart}+`,
+    rangeStart: tailRangeStart,
+    rangeEnd: Infinity,
+    probability: clampProbability(tailProbability),
+  });
+
+  const total = rangeProbabilities.reduce((sum, p) => sum + clampProbability(p.probability), 0);
+  if (total > 0 && Number.isFinite(total)) {
+    rangeProbabilities.forEach((p) => {
+      p.probability = clampProbability(p.probability / total);
+    });
+  } else {
+    const mostLikelyStart = Math.max(0, Math.floor(projectedTotal / RANGE_SIZE) * RANGE_SIZE);
+    rangeProbabilities.forEach((p) => {
+      p.probability = p.rangeStart === mostLikelyStart ? 1 : 0;
+    });
+  }
+
+  rangeProbabilities.sort((a, b) => b.probability - a.probability);
+  return rangeProbabilities;
+}
+
+function buildProjectionMetrics(
+  trackingId: string,
+  data: {
+    title: string;
+    startDate: string;
+    endDate: string;
+    stats: {
+      total: number;
+      daily?: HourlySlot[];
+    };
+  }
+) {
+  const now = Date.now();
+  const startTime = new Date(data.startDate).getTime();
+  const endTime = new Date(data.endDate).getTime();
+  const currentCount = data.stats.total;
+
+  const hoursElapsed = Math.max(0, (now - startTime) / (1000 * 60 * 60));
+  const hoursTotal = Math.max(0, (endTime - startTime) / (1000 * 60 * 60));
+  const hoursRemaining = Math.max(0, hoursTotal - hoursElapsed);
+
+  if (hoursElapsed < MIN_HOURS_FOR_PROJECTION || currentCount < MIN_TWEETS_FOR_PROJECTION) {
+    return {
+      error: {
+        error: 'Insufficient data for projection',
+        hoursElapsed,
+        currentCount,
+      },
+    };
+  }
+
+  const dailySlots: HourlySlot[] = (data.stats.daily ?? []).filter((slot) => Number.isFinite(slot?.count));
+  const hourlyCounts = dailySlots.map((slot) => Math.max(0, slot.count));
+
+  const tweetsPerHour = hoursElapsed > 0 ? currentCount / hoursElapsed : 0;
+
+  let pace24h: number | undefined;
+  if (dailySlots.length >= 2) {
+    const last24 = dailySlots.slice(-24);
+    const tweetsLast24h = last24.reduce((sum, slot) => sum + slot.count, 0);
+    const hoursCovered = last24.length;
+    const rate = hoursCovered > 0 ? tweetsLast24h / hoursCovered : 0;
+    if (rate < 50 && Math.abs(rate - tweetsPerHour) > 0.2) {
+      pace24h = rate;
+    }
+  }
+
+  const dispersion = estimateDispersion(hourlyCounts);
+
+  let projectionRate = tweetsPerHour;
+  if (pace24h !== undefined) {
+    const recentWeight = clampNumber((hoursElapsed - 8) / 40, 0, 0.65);
+    projectionRate = tweetsPerHour * (1 - recentWeight) + pace24h * recentWeight;
+  }
+
+  if (dispersion > 1.4 && projectionRate > tweetsPerHour) {
+    projectionRate *= 0.95;
+  }
+
+  const expectedRemaining = Math.max(0, projectionRate * hoursRemaining);
+  const projectedTotal = currentCount + expectedRemaining;
+
+  const remainingFraction = hoursTotal > 0 ? clampNumber(hoursRemaining / hoursTotal, 0, 1) : 0;
+  const processStd = Math.sqrt(Math.max(1, expectedRemaining * dispersion));
+  const floorStd = Math.max(1, projectedTotal * 0.025);
+  const capStd = Math.max(floorStd, projectedTotal * (0.03 + 0.12 * Math.sqrt(remainingFraction)));
+  const std = Math.min(capStd, Math.max(floorStd, processStd * 1.2));
+
+  const projectedRange = {
+    low: Math.max(0, Math.floor(projectedTotal - std * 1.4)),
+    high: Math.max(0, Math.ceil(projectedTotal + std * 1.4)),
+  };
+
+  const progress = hoursTotal > 0 ? clampNumber(hoursElapsed / hoursTotal, 0, 1) : 0;
+  const dispersionPenalty = Math.max(0, Math.min(0.12, (dispersion - 1) * 0.08));
+  const confidenceRaw = 0.2 + 0.75 * Math.pow(progress, 1.15) - dispersionPenalty;
+  const confidence = clampNumber(confidenceRaw, 0.15, 0.95);
+
+  const rangeProbabilities = buildRangeProbabilities(
+    currentCount,
+    projectedTotal,
+    projectionRate,
+    hoursRemaining,
+    hourlyCounts
+  );
+
+  return {
+    payload: {
+      trackingId,
+      title: data.title,
+      currentCount,
+      tweetsPerHour,
+      pace24h,
+      projectedTotal,
+      projectedRange,
+      confidence,
+      hoursElapsed,
+      hoursRemaining,
+      periodStart: data.startDate,
+      periodEnd: data.endDate,
+      rangeProbabilities,
+    },
+  };
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -188,120 +469,12 @@ async function startServer() {
         return res.status(500).json({ error: 'Missing stats in XTracker response' });
       }
 
-      const now = Date.now();
-      const startTime = new Date(data.startDate).getTime();
-      const endTime = new Date(data.endDate).getTime();
-      const currentCount = data.stats.total;
-
-      const hoursElapsed = (now - startTime) / (1000 * 60 * 60);
-      const hoursTotal = (endTime - startTime) / (1000 * 60 * 60);
-      const hoursRemaining = Math.max(0, hoursTotal - hoursElapsed);
-
-      // Require at least 4h of data and 20 tweets before projecting — otherwise the rate estimate is meaningless
-      const MIN_HOURS = 4;
-      const MIN_TWEETS = 20;
-      if (hoursElapsed < MIN_HOURS || currentCount < MIN_TWEETS) {
-        return res.status(404).json({ error: 'Insufficient data for projection', hoursElapsed, currentCount });
+      const projection = buildProjectionMetrics(trackingId, data);
+      if (projection.error) {
+        return res.status(404).json(projection.error);
       }
 
-      // Guard against division by zero
-      const tweetsPerHour = hoursElapsed > 0 ? currentCount / hoursElapsed : 0;
-
-      // Calculate true last-24h pace from hourly data (sum of last 24 hourly slots / 24)
-      let pace24h: number | undefined;
-      const daily: Array<{ date: string; count: number }> = data.stats.daily ?? [];
-      if (daily.length >= 2) {
-        const last24 = daily.slice(-24);
-        const tweetsLast24h = last24.reduce((sum: number, d: { count: number }) => sum + d.count, 0);
-        const hoursCovered = last24.length;
-        const rate = hoursCovered > 0 ? tweetsLast24h / hoursCovered : 0;
-        // Only use if meaningfully different from avg pace and plausible (< 50/hr)
-        if (rate < 50 && Math.abs(rate - tweetsPerHour) > 0.2) {
-          pace24h = rate;
-        }
-      }
-
-      // Correct projection: what we have now + expected tweets in remaining time
-      const projectedTotal = currentCount + tweetsPerHour * hoursRemaining;
-
-      // Uncertainty narrows as the period advances — std scales with hoursRemaining fraction
-      const remainingFraction = hoursTotal > 0 ? hoursRemaining / hoursTotal : 0;
-      const baseUncertainty = projectedTotal * 0.15;
-      const std = Math.max(1, baseUncertainty * Math.sqrt(remainingFraction));
-
-      const projectedRange = {
-        low: Math.floor(projectedTotal - std * 1.5),
-        high: Math.ceil(projectedTotal + std * 1.5),
-      };
-
-      // Guard against hoursTotal = 0 (malformed API data)
-      const confidence = hoursTotal > 0 ? Math.min(0.95, hoursElapsed / hoursTotal + 0.1) : 0;
-
-      // Calculate range probabilities using normal distribution
-      const mean = projectedTotal;
-
-      const erf = (x: number): number => {
-        const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741, a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
-        const sign = x < 0 ? -1 : 1;
-        x = Math.abs(x);
-        const t = 1.0 / (1.0 + p * x);
-        const y = 1.0 - ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
-        return sign * y;
-      };
-
-      const normalCdf = (x: number, m: number, s: number): number => {
-        return 0.5 * (1 + erf((x - m) / (s * Math.sqrt(2))));
-      };
-
-      const rangeProbabilities: Array<{ range: string; rangeStart: number; rangeEnd: number; probability: number }> = [];
-
-      // Calculate probabilities for ranges 160-179, 180-199, ..., 480-499
-      for (let start = 160; start < 500; start += 20) {
-        const end = start + 19;
-        const cdfEnd = normalCdf(end, mean, std);
-        const cdfStart = normalCdf(start - 1, mean, std);
-        const probability = Math.max(0, cdfEnd - cdfStart);
-
-        rangeProbabilities.push({
-          range: `${start}-${end}`,
-          rangeStart: start,
-          rangeEnd: end,
-          probability,
-        });
-      }
-
-      // Add 500+ bucket
-      rangeProbabilities.push({
-        range: "500+",
-        rangeStart: 500,
-        rangeEnd: Infinity,
-        probability: 1 - normalCdf(499, mean, std),
-      });
-
-      // Normalize probabilities to sum to 1
-      const total = rangeProbabilities.reduce((sum, p) => sum + p.probability, 0);
-      if (total > 0) {
-        rangeProbabilities.forEach((p) => (p.probability /= total));
-      }
-
-      // Sort descending by probability
-      rangeProbabilities.sort((a, b) => b.probability - a.probability);
-
-      res.json({
-        trackingId,
-        title: data.title,
-        currentCount,
-        tweetsPerHour,
-        pace24h,
-        projectedTotal,
-        projectedRange,
-        confidence,
-        hoursElapsed,
-        hoursRemaining,
-        periodStart: data.startDate,
-        periodEnd: data.endDate,
-        rangeProbabilities,
-      });
+      res.json(projection.payload);
     } catch (error) {
       console.error('Tweet projection error:', error);
       res.status(500).json({ error: 'Failed to calculate tweet projection' });
@@ -365,78 +538,12 @@ async function startServer() {
         return res.status(500).json({ error: 'Missing stats in XTracker response' });
       }
 
-      const now = Date.now();
-      const startTime = new Date(data.startDate).getTime();
-      const endTime = new Date(data.endDate).getTime();
-      const currentCount = data.stats.total;
-
-      const hoursElapsed = (now - startTime) / (1000 * 60 * 60);
-      const hoursTotal = (endTime - startTime) / (1000 * 60 * 60);
-      const hoursRemaining = Math.max(0, hoursTotal - hoursElapsed);
-
-      // Require at least 4h of data and 20 tweets before projecting
-      const MIN_HOURS = 4;
-      const MIN_TWEETS = 20;
-      if (hoursElapsed < MIN_HOURS || currentCount < MIN_TWEETS) {
-        return res.status(404).json({ error: 'Insufficient data for projection', hoursElapsed, currentCount });
+      const projection = buildProjectionMetrics(matched.id, data);
+      if (projection.error) {
+        return res.status(404).json(projection.error);
       }
 
-      const tweetsPerHour = hoursElapsed > 0 ? currentCount / hoursElapsed : 0;
-      let pace24h: number | undefined;
-      const daily2: Array<{ date: string; count: number }> = data.stats.daily ?? [];
-      if (daily2.length >= 2) {
-        const last24 = daily2.slice(-24);
-        const tweetsLast24h = last24.reduce((sum: number, d: { count: number }) => sum + d.count, 0);
-        const rate = last24.length > 0 ? tweetsLast24h / last24.length : 0;
-        if (rate < 50 && Math.abs(rate - tweetsPerHour) > 0.2) pace24h = rate;
-      }
-      // Correct projection: current count + expected remaining tweets
-      const projectedTotal = currentCount + tweetsPerHour * hoursRemaining;
-
-      // Uncertainty narrows as period advances
-      const remainingFraction = hoursTotal > 0 ? hoursRemaining / hoursTotal : 0;
-      const baseUncertainty = projectedTotal * 0.15;
-      const std = Math.max(1, baseUncertainty * Math.sqrt(remainingFraction));
-
-      const projectedRange = {
-        low: Math.floor(projectedTotal - std * 1.5),
-        high: Math.ceil(projectedTotal + std * 1.5),
-      };
-      const confidence = hoursTotal > 0 ? Math.min(0.95, hoursElapsed / hoursTotal + 0.1) : 0;
-
-      const mean = projectedTotal;
-
-      const erf = (x: number): number => {
-        const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741, a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
-        const sign = x < 0 ? -1 : 1;
-        x = Math.abs(x);
-        const t = 1.0 / (1.0 + p * x);
-        const y = 1.0 - ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
-        return sign * y;
-      };
-      const normalCdf = (x: number, m: number, s: number) => 0.5 * (1 + erf((x - m) / (s * Math.sqrt(2))));
-
-      const rangeProbabilities: Array<{ range: string; rangeStart: number; rangeEnd: number; probability: number }> = [];
-      for (let start = 160; start < 500; start += 20) {
-        const end = start + 19;
-        rangeProbabilities.push({
-          range: `${start}-${end}`, rangeStart: start, rangeEnd: end,
-          probability: Math.max(0, normalCdf(end, mean, std) - normalCdf(start - 1, mean, std)),
-        });
-      }
-      rangeProbabilities.push({ range: '500+', rangeStart: 500, rangeEnd: Infinity, probability: 1 - normalCdf(499, mean, std) });
-
-      const totalProb = rangeProbabilities.reduce((s, p) => s + p.probability, 0);
-      if (totalProb > 0) rangeProbabilities.forEach(p => (p.probability /= totalProb));
-      rangeProbabilities.sort((a, b) => b.probability - a.probability);
-
-      res.json({
-        trackingId: matched.id, title: data.title, currentCount,
-        tweetsPerHour, pace24h, projectedTotal, projectedRange, confidence,
-        hoursElapsed, hoursRemaining,
-        periodStart: data.startDate, periodEnd: data.endDate,
-        rangeProbabilities,
-      });
+      res.json(projection.payload);
     } catch (error) {
       console.error('Tweet projection by date error:', error);
       res.status(500).json({ error: 'Failed to calculate tweet projection' });
