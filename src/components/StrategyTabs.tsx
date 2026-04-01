@@ -199,7 +199,7 @@ export function StrategyTabs({ buckets, tweetProjection, budget, onApplyStrategy
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <div className="flex items-center justify-between gap-3 mb-1">
+        <div className="mb-1 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <h3 className="font-mono text-xs uppercase tracking-[0.2em] opacity-50">Suggested strategies</h3>
           <button
             type="button"
@@ -209,7 +209,8 @@ export function StrategyTabs({ buckets, tweetProjection, budget, onApplyStrategy
             aria-expanded={isExplainOpen}
             aria-controls="strategy-explainability-modal"
           >
-            How this works
+            <span className="sm:hidden">Method</span>
+            <span className="hidden sm:inline">How this works</span>
           </button>
         </div>
         <p className="text-sm font-serif italic opacity-60">
@@ -251,7 +252,7 @@ export function StrategyTabs({ buckets, tweetProjection, budget, onApplyStrategy
                   </div>
                   <div>
                     <dt className="font-mono text-xs uppercase tracking-wider">Market</dt>
-                    <dd className="opacity-70">Current market-implied probability for a bucket, shown as a percent. Approximation: market probability = price.</dd>
+                    <dd className="opacity-70">Current ask-implied probability for a bucket, shown as a percent. Approximation: market probability = ask price.</dd>
                   </div>
                   <div>
                     <dt className="font-mono text-xs uppercase tracking-wider">Proj.</dt>
@@ -267,11 +268,11 @@ export function StrategyTabs({ buckets, tweetProjection, budget, onApplyStrategy
                   </div>
                   <div>
                     <dt className="font-mono text-xs uppercase tracking-wider">Payout</dt>
-                    <dd className="opacity-70">Gross payout if that specific bucket hits at current price. Formula: payout = stake / price.</dd>
+                    <dd className="opacity-70">Gross payout if that specific bucket hits at current ask price. Formula: payout = stake / ask price.</dd>
                   </div>
                   <div>
                     <dt className="font-mono text-xs uppercase tracking-wider">Coverage</dt>
-                    <dd className="opacity-70">Total market probability of selected buckets. Formula: coverage = sum of selected market prices.</dd>
+                    <dd className="opacity-70">Total market probability of selected buckets. Formula: coverage = sum of selected ask prices.</dd>
                   </div>
                   <div>
                     <dt className="font-mono text-xs uppercase tracking-wider">Min ROI</dt>
@@ -296,12 +297,12 @@ export function StrategyTabs({ buckets, tweetProjection, budget, onApplyStrategy
       )}
 
       {/* Tabs */}
-      <div className="flex border-b border-ink/20">
+      <div className="grid grid-cols-3 border-b border-ink/20">
         {(Object.keys(TAB_META) as TabId[]).map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`px-4 py-3 font-mono text-[10px] uppercase tracking-widest transition-colors focus:outline-none focus:ring-2 focus:ring-ink ${
+            className={`px-2 py-3 text-center font-mono text-[9px] uppercase tracking-wide transition-colors focus:outline-none focus:ring-2 focus:ring-ink sm:px-4 sm:text-[10px] sm:tracking-widest ${
               activeTab === tab
                 ? 'border-b-2 border-ink text-ink -mb-px'
                 : 'text-ink/40 hover:text-ink/70'
@@ -356,54 +357,89 @@ export function StrategyTabs({ buckets, tweetProjection, budget, onApplyStrategy
         {/* Bucket list */}
         {current.selected.length > 0 ? (
           <div className="border border-ink/10">
-            {/* Column headers */}
-            <div className="grid grid-cols-12 px-4 py-2 border-b border-ink/10 font-mono text-[9px] uppercase tracking-wider opacity-40">
-              <span className="col-span-3">Bucket</span>
-              <span className="col-span-2 text-right">Market</span>
-              {tweetProjection && <span className="col-span-2 text-right">Proj.</span>}
-              {tweetProjection && <span className="col-span-2 text-right">EV/$1</span>}
-              <span className={`${tweetProjection ? 'col-span-1' : 'col-span-5'} text-right`}>Kelly stake $</span>
-              <span className="col-span-2 text-right">Payout</span>
+            <div className="hidden md:block">
+              <div className="grid grid-cols-12 border-b border-ink/10 px-4 py-2 font-mono text-[9px] uppercase tracking-wider opacity-40">
+                <span className="col-span-3">Bucket</span>
+                <span className="col-span-2 text-right">Market</span>
+                {tweetProjection && <span className="col-span-2 text-right">Proj.</span>}
+                {tweetProjection && <span className="col-span-2 text-right">EV/$1</span>}
+                <span className={`${tweetProjection ? 'col-span-1' : 'col-span-5'} text-right`}>Kelly stake $</span>
+                <span className="col-span-2 text-right">Payout</span>
+              </div>
+
+              {current.selected.map(b => {
+                const payout = perBucketBudget / b.price;
+                const ev = b.projectedProb !== undefined
+                  ? (b.projectedProb / b.price) - 1
+                  : null;
+                const kelly = b.projectedProb !== undefined && b.price < 1
+                  ? Math.max(0, (b.projectedProb - b.price) / (1 - b.price))
+                  : null;
+                const kellyStake = kelly !== null ? kelly * budget : null;
+                return (
+                  <div
+                    key={b.id}
+                    className="grid grid-cols-12 items-center border-b border-ink/5 px-4 py-3 text-sm last:border-0"
+                  >
+                    <span className="col-span-3 font-mono font-bold">{b.name}</span>
+                    <span className="col-span-2 text-right font-mono">{formatPct(b.price)}</span>
+                    {tweetProjection && (
+                      <span className="col-span-2 text-right font-mono opacity-60">
+                        {b.projectedProb !== undefined ? formatPct(b.projectedProb) : '—'}
+                      </span>
+                    )}
+                    {tweetProjection && (
+                      <span className={`col-span-2 text-right font-mono text-xs ${ev !== null && ev > 0 ? 'text-positive font-bold' : ev !== null && ev < 0 ? 'text-negative' : 'opacity-40'}`}>
+                        {ev !== null ? `${ev > 0 ? '+' : ''}${ev.toFixed(2)}` : '—'}
+                      </span>
+                    )}
+                    <span className={`${tweetProjection ? 'col-span-1' : 'col-span-5'} text-right font-mono text-xs opacity-60`}>
+                      {kellyStake !== null ? formatUSD(kellyStake) : formatUSD(perBucketBudget)}
+                    </span>
+                    <span className="col-span-2 text-right font-mono font-bold">
+                      {formatUSD(payout)}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
 
-            {current.selected.map(b => {
-              const payout = perBucketBudget / b.price;
-              // EV per $1: projProb * (1/marketPrice) - 1
-              const ev = b.projectedProb !== undefined
-                ? (b.projectedProb / b.price) - 1
-                : null;
-              // Kelly fraction: (edge) / (odds - 1) = (projProb - marketPrice) / (1/marketPrice - 1)
-              // Simplified: (projProb - marketPrice) / (1 - marketPrice)
-              const kelly = b.projectedProb !== undefined && b.price < 1
-                ? Math.max(0, (b.projectedProb - b.price) / (1 - b.price))
-                : null;
-              const kellyStake = kelly !== null ? kelly * budget : null;
-              return (
-                <div
-                  key={b.id}
-                  className="grid grid-cols-12 px-4 py-3 border-b border-ink/5 last:border-0 items-center text-sm"
-                >
-                  <span className="col-span-3 font-mono font-bold">{b.name}</span>
-                  <span className="col-span-2 text-right font-mono">{formatPct(b.price)}</span>
-                  {tweetProjection && (
-                    <span className="col-span-2 text-right font-mono opacity-60">
-                      {b.projectedProb !== undefined ? formatPct(b.projectedProb) : '—'}
-                    </span>
-                  )}
-                  {tweetProjection && (
-                    <span className={`col-span-2 text-right font-mono text-xs ${ev !== null && ev > 0 ? 'text-positive font-bold' : ev !== null && ev < 0 ? 'text-negative' : 'opacity-40'}`}>
-                      {ev !== null ? `${ev > 0 ? '+' : ''}${ev.toFixed(2)}` : '—'}
-                    </span>
-                  )}
-                  <span className={`${tweetProjection ? 'col-span-1' : 'col-span-5'} text-right font-mono text-xs opacity-60`}>
-                    {kellyStake !== null ? formatUSD(kellyStake) : formatUSD(perBucketBudget)}
-                  </span>
-                  <span className="col-span-2 text-right font-mono font-bold">
-                    {formatUSD(payout)}
-                  </span>
-                </div>
-              );
-            })}
+            <div className="divide-y divide-ink/5 md:hidden">
+              {current.selected.map(b => {
+                const payout = perBucketBudget / b.price;
+                const ev = b.projectedProb !== undefined
+                  ? (b.projectedProb / b.price) - 1
+                  : null;
+                const kelly = b.projectedProb !== undefined && b.price < 1
+                  ? Math.max(0, (b.projectedProb - b.price) / (1 - b.price))
+                  : null;
+                const kellyStake = kelly !== null ? kelly * budget : null;
+                return (
+                  <div key={b.id} className="space-y-3 px-3 py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-mono text-sm font-bold break-words">{b.name}</span>
+                      <span className="font-mono text-xs opacity-60">Mkt {formatPct(b.price)}</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 font-mono text-xs">
+                      {tweetProjection && (
+                        <>
+                          <span className="uppercase tracking-wide opacity-40">Proj.</span>
+                          <span className="text-right opacity-60">{b.projectedProb !== undefined ? formatPct(b.projectedProb) : '—'}</span>
+                          <span className="uppercase tracking-wide opacity-40">EV/$1</span>
+                          <span className={`text-right ${ev !== null && ev > 0 ? 'text-positive font-bold' : ev !== null && ev < 0 ? 'text-negative' : 'opacity-40'}`}>
+                            {ev !== null ? `${ev > 0 ? '+' : ''}${ev.toFixed(2)}` : '—'}
+                          </span>
+                        </>
+                      )}
+                      <span className="uppercase tracking-wide opacity-40">Kelly $</span>
+                      <span className="text-right opacity-60">{kellyStake !== null ? formatUSD(kellyStake) : formatUSD(perBucketBudget)}</span>
+                      <span className="uppercase tracking-wide opacity-40">Payout</span>
+                      <span className="text-right font-bold">{formatUSD(payout)}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         ) : (
           <p className="text-xs font-mono opacity-40 py-4">No buckets available for this strategy.</p>
@@ -411,28 +447,28 @@ export function StrategyTabs({ buckets, tweetProjection, budget, onApplyStrategy
 
         {/* Summary row */}
         {current.selected.length > 0 && (
-          <div className="flex items-end justify-between pt-2 border-t border-ink/10">
+          <div className="space-y-4 border-t border-ink/10 pt-2 md:flex md:items-end md:justify-between md:space-y-0">
             <div className="space-y-1">
-              <div className="flex gap-6">
+              <div className="grid grid-cols-3 gap-3 md:flex md:gap-6">
                 <div>
                   <span className="font-mono text-[9px] uppercase opacity-40 block">Coverage</span>
-                  <span className="font-mono font-bold text-lg">{formatPct(current.coverage)}</span>
+                  <span className="font-mono text-base font-bold md:text-lg">{formatPct(current.coverage)}</span>
                 </div>
                 <div>
                   <span className="font-mono text-[9px] uppercase opacity-40 block">Min. ROI</span>
-                  <span className={`font-mono font-bold text-lg ${roi > 0 ? 'text-positive' : roi < 0 ? 'text-negative' : 'text-neutral'}`}>
+                  <span className={`font-mono text-base font-bold md:text-lg ${roi > 0 ? 'text-positive' : roi < 0 ? 'text-negative' : 'text-neutral'}`}>
                     {roi > 0 ? '+' : ''}{roi.toFixed(0)}%
                   </span>
                 </div>
                 <div>
                   <span className="font-mono text-[9px] uppercase opacity-40 block">Payout if hit</span>
-                  <span className="font-mono font-bold text-lg">{formatUSD(budget / current.coverage)}</span>
+                  <span className="font-mono text-base font-bold md:text-lg">{formatUSD(budget / current.coverage)}</span>
                 </div>
               </div>
             </div>
             <button
               onClick={handleApply}
-              className="px-4 py-2 bg-ink text-bg font-mono text-[10px] uppercase tracking-widest hover:opacity-80 transition-opacity focus:outline-none focus:ring-2 focus:ring-ink focus:ring-offset-2"
+              className="w-full bg-ink px-4 py-2 font-mono text-[10px] uppercase tracking-widest text-bg transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-ink focus:ring-offset-2 md:w-auto"
             >
               Apply selection ↓
             </button>

@@ -22,8 +22,8 @@ export interface PolymarketMarket {
   volume1wk?: number; // Volume in last week
   volume1mo?: number; // Volume in last month
   volume1yr?: number; // Volume in last year
-  bestAsk?: number; // Best ask price
-  bestBid?: number; // Best bid price
+  bestAsk?: number | string; // Market best ask (entry price to buy)
+  bestBid?: number | string; // Market best bid (price to sell)
   lastTradePrice?: number; // Last trade price
   spread?: number; // Bid-ask spread
   oneDayPriceChange?: number; // 24h price change
@@ -64,7 +64,7 @@ export interface TrackingStats {
 export interface Bucket {
   id: string;
   name: string;
-  price: number;
+  price: number; // Detail view entry price (best ask when available)
   tokenId: string;
 }
 

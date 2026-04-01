@@ -3,13 +3,17 @@ import { MarketSelector } from './components/MarketSelector';
 import { BucketList } from './components/BucketList';
 import { BetCalculator } from './components/BetCalculator';
 import { PolymarketEvent, TweetProjection, ProjectionInsufficient } from './types';
-import { parseBuckets, getTrackingStats, getActiveCounts, getTweetProjection, getTweetProjectionByDate, TrackingStats } from './services/polymarket';
+import { searchMarkets, parseBuckets, getTrackingStats, getActiveCounts, getTweetProjection, getTweetProjectionByDate, TrackingStats } from './services/polymarket';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowLeft, Info, TrendingUp, Sun, Moon, Copy } from 'lucide-react';
+import { ArrowLeft, Info, TrendingUp, Sun, Moon, Copy, RotateCw } from 'lucide-react';
 import { StatsModule } from './components/StatsModule';
 import { StrategyTabs } from './components/StrategyTabs';
 
 export default function App() {
+  const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+  const AUTO_REFRESH_RETRY_DELAY_MS = 10 * 1000;
+  const MANUAL_REFRESH_COOLDOWN_MS = 20 * 1000;
+
   const [selectedMarket, setSelectedMarket] = useState<PolymarketEvent | null>(null);
   const [selectedBucketIds, setSelectedBucketIds] = useState<Set<string>>(new Set());
   const [budget, setBudget] = useState<number>(100);
@@ -19,7 +23,14 @@ export default function App() {
   const [projectionInsufficient, setProjectionInsufficient] = useState<ProjectionInsufficient | null>(null);
   const [dark, setDark] = useState(false);
   const [copied, setCopied] = useState(false);
-  const autoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [nowMs, setNowMs] = useState(Date.now());
+  const [nextAutoRefreshAt, setNextAutoRefreshAt] = useState<number | null>(null);
+  const [manualCooldownUntil, setManualCooldownUntil] = useState<number | null>(null);
+  const [isManualRefreshing, setIsManualRefreshing] = useState(false);
+  const autoRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const selectedMarketRef = useRef<PolymarketEvent | null>(null);
+  const refreshRequestIdRef = useRef(0);
+  const refreshInFlightRef = useRef(false);
 
   const TIPS_ADDRESS = '0x137789060E41030417b7835B6647EFe9b712F6F3';
   const truncatedAddress = `${TIPS_ADDRESS.slice(0, 6)}...${TIPS_ADDRESS.slice(-4)}`;
@@ -64,21 +75,60 @@ export default function App() {
     loadActiveCounts();
   }, []);
 
-  const refreshMarketData = React.useCallback(async (market: PolymarketEvent) => {
-    const counts = await getActiveCounts();
-    setActiveCounts(counts);
-    const preFetched = counts.find(s => s.id === market.trackingId);
-    if (preFetched) {
-      setCurrentStats(preFetched);
-    } else if (market.trackingId) {
-      const stats = await getTrackingStats(market.trackingId);
-      setCurrentStats(stats);
+  useEffect(() => {
+    const ticker = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(ticker);
+  }, []);
+
+  const refreshMarketData = React.useCallback(async (market: PolymarketEvent, refreshEventData = true) => {
+    const requestId = ++refreshRequestIdRef.current;
+    const isCurrentRequest = () => refreshRequestIdRef.current === requestId;
+
+    let marketForDetail = market;
+
+    if (refreshEventData) {
+      const markets = await searchMarkets('Elon Musk');
+      if (!isCurrentRequest()) return;
+
+      const refreshed = markets.find(m => m.id === market.id || (market.slug && m.slug === market.slug));
+      if (refreshed) {
+        marketForDetail = refreshed;
+        if (isCurrentRequest()) {
+          setSelectedMarket(prev => (prev && prev.id === refreshed.id ? refreshed : prev));
+        }
+        const availableBucketIds = new Set(parseBuckets(refreshed).map(b => b.id));
+        if (isCurrentRequest()) {
+          setSelectedBucketIds(prev => {
+            const next = new Set<string>();
+            for (const id of prev) {
+              if (availableBucketIds.has(id)) {
+                next.add(id);
+              }
+            }
+            return next.size === prev.size ? prev : next;
+          });
+        }
+      }
     }
-    const result = market.trackingId
-      ? await getTweetProjection(market.trackingId)
-      : market.endDate
-        ? await getTweetProjectionByDate(market.endDate, market.slug)
+
+    if (marketForDetail.trackingId) {
+      const stats = await getTrackingStats(marketForDetail.trackingId);
+      if (!isCurrentRequest()) return;
+      setCurrentStats(stats);
+    } else {
+      if (!isCurrentRequest()) return;
+      setCurrentStats(null);
+    }
+
+    const result = marketForDetail.trackingId
+      ? await getTweetProjection(marketForDetail.trackingId)
+      : marketForDetail.endDate
+        ? await getTweetProjectionByDate(marketForDetail.endDate, marketForDetail.slug)
         : null;
+    if (!isCurrentRequest()) return;
+
     if (result && 'insufficient' in result) {
       setProjectionInsufficient(result);
       setTweetProjection(null);
@@ -89,25 +139,95 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!selectedMarket) {
-      if (autoRefreshRef.current !== null) {
-        clearInterval(autoRefreshRef.current);
-        autoRefreshRef.current = null;
+    selectedMarketRef.current = selectedMarket;
+  }, [selectedMarket]);
+
+  const clearAutoRefresh = React.useCallback(() => {
+    if (autoRefreshRef.current !== null) {
+      clearTimeout(autoRefreshRef.current);
+      autoRefreshRef.current = null;
+    }
+  }, []);
+
+  const scheduleAutoRefresh = React.useCallback((delayMs = AUTO_REFRESH_INTERVAL_MS) => {
+    clearAutoRefresh();
+    const nextAt = Date.now() + delayMs;
+    setNextAutoRefreshAt(nextAt);
+
+    autoRefreshRef.current = window.setTimeout(async () => {
+      const market = selectedMarketRef.current;
+      if (!market) {
+        setNextAutoRefreshAt(null);
+        return;
       }
+
+      if (refreshInFlightRef.current) {
+        scheduleAutoRefresh(AUTO_REFRESH_RETRY_DELAY_MS);
+        return;
+      }
+
+      refreshInFlightRef.current = true;
+      try {
+        await refreshMarketData(market);
+      } catch (error) {
+        console.error('Auto refresh failed:', error);
+      } finally {
+        refreshInFlightRef.current = false;
+        if (selectedMarketRef.current) {
+          scheduleAutoRefresh(AUTO_REFRESH_INTERVAL_MS);
+        } else {
+          setNextAutoRefreshAt(null);
+        }
+      }
+    }, delayMs);
+  }, [AUTO_REFRESH_INTERVAL_MS, AUTO_REFRESH_RETRY_DELAY_MS, clearAutoRefresh, refreshMarketData]);
+
+  const selectedMarketId = selectedMarket?.id;
+
+  useEffect(() => {
+    if (!selectedMarketId) {
+      clearAutoRefresh();
+      setNextAutoRefreshAt(null);
+      setManualCooldownUntil(null);
       return;
     }
-    const marketSnapshot = selectedMarket;
-    autoRefreshRef.current = setInterval(() => {
-      refreshMarketData(marketSnapshot);
-    }, 300000);
+
+    scheduleAutoRefresh();
+
     return () => {
-      if (autoRefreshRef.current !== null) {
-        clearInterval(autoRefreshRef.current);
-        autoRefreshRef.current = null;
-      }
+      clearAutoRefresh();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedMarket?.id]);
+  }, [clearAutoRefresh, scheduleAutoRefresh, selectedMarketId]);
+
+  const handleManualRefresh = async () => {
+    const market = selectedMarketRef.current;
+    const remainingCooldownMs = manualCooldownUntil ? manualCooldownUntil - Date.now() : 0;
+    if (!market || isManualRefreshing || refreshInFlightRef.current || remainingCooldownMs > 0) {
+      return;
+    }
+
+    setManualCooldownUntil(Date.now() + MANUAL_REFRESH_COOLDOWN_MS);
+    setIsManualRefreshing(true);
+    refreshInFlightRef.current = true;
+    try {
+      await refreshMarketData(market);
+      scheduleAutoRefresh();
+    } finally {
+      refreshInFlightRef.current = false;
+      setIsManualRefreshing(false);
+    }
+  };
+
+  const autoRefreshSecondsLeft = nextAutoRefreshAt ? Math.max(0, Math.ceil((nextAutoRefreshAt - nowMs) / 1000)) : null;
+  const manualCooldownSecondsLeft = manualCooldownUntil ? Math.max(0, Math.ceil((manualCooldownUntil - nowMs) / 1000)) : 0;
+  const manualRefreshDisabled = !selectedMarket || isManualRefreshing || manualCooldownSecondsLeft > 0;
+
+  const formatRemainingTime = (seconds: number) => {
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${minutes}m ${secs.toString().padStart(2, '0')}s`;
+  };
 
   const handleMarketSelect = async (market: PolymarketEvent) => {
     setSelectedMarket(market);
@@ -115,51 +235,51 @@ export default function App() {
     setTweetProjection(null);
     setProjectionInsufficient(null);
 
-    // Try to find stats in pre-fetched activeCounts
-    const preFetched = activeCounts.find(s => s.id === market.trackingId);
-    if (preFetched) {
-      setCurrentStats(preFetched);
-    } else if (market.trackingId) {
-      const stats = await getTrackingStats(market.trackingId);
-      setCurrentStats(stats);
-    } else {
-      setCurrentStats(null);
-    }
-
-    // Fetch tweet projection: by trackingId if available, otherwise match by event endDate
-    const result = market.trackingId
-      ? await getTweetProjection(market.trackingId)
-      : market.endDate
-        ? await getTweetProjectionByDate(market.endDate, market.slug)
-        : null;
-
-    if (result && 'insufficient' in result) {
-      setProjectionInsufficient(result);
-    } else {
-      setTweetProjection(result);
-    }
+    await refreshMarketData(market, false);
   };
+
+  const nextRefreshLabel = !selectedMarket
+    ? 'Next refresh in -- (select market)'
+    : `Next refresh in ${formatRemainingTime(autoRefreshSecondsLeft ?? 0)}`;
 
   return (
     <div className="min-h-screen max-w-6xl mx-auto px-4 py-12 md:py-20">
       <header className="mb-12 md:mb-20 space-y-4">
-        <div className="flex justify-between items-baseline">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <h1 className="text-5xl md:text-7xl font-serif italic tracking-tighter">
             Musk <span className="not-italic font-sans font-bold uppercase text-2xl md:text-4xl tracking-normal">Oracle</span>
           </h1>
-          <div className="flex items-center gap-4">
-            <div className="font-mono text-[10px] uppercase tracking-widest opacity-50">
-              Polymarket Analysis Tool v1.3
+          <div className="flex w-full justify-end sm:w-auto">
+            <div className="flex w-full flex-col items-end sm:w-auto">
+              <div className="flex w-full items-center justify-between gap-2 border border-ink/20 px-2 py-1.5 sm:w-auto">
+                <div className="min-w-0 font-mono text-[10px] uppercase tracking-widest opacity-70 whitespace-nowrap">
+                  {manualCooldownSecondsLeft > 0
+                    ? `${nextRefreshLabel} · Manual in ${formatRemainingTime(manualCooldownSecondsLeft)}`
+                    : nextRefreshLabel}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      void handleManualRefresh();
+                    }}
+                    disabled={manualRefreshDisabled}
+                    aria-label={isManualRefreshing ? 'Refreshing market detail' : 'Refresh market detail'}
+                    className="p-2 border border-ink/20 hover:bg-ink hover:text-bg transition-colors focus:outline-none focus:ring-2 focus:ring-ink disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <RotateCw className={`w-3.5 h-3.5 ${isManualRefreshing ? 'animate-spin' : ''}`} />
+                  </button>
+                  <button
+                    onClick={toggleTheme}
+                    aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+                    className="p-2 border border-ink/20 hover:bg-ink hover:text-bg transition-colors focus:outline-none focus:ring-2 focus:ring-ink"
+                  >
+                    {dark ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
             </div>
-            <button
-              onClick={toggleTheme}
-              aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
-              className="p-2 border border-ink/20 hover:bg-ink hover:text-bg transition-colors focus:outline-none focus:ring-2 focus:ring-ink"
-            >
-              {dark ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
-            </button>
           </div>
-        </div>
+          </div>
         <div className="h-px bg-ink w-full" />
       </header>
 
@@ -361,7 +481,7 @@ export default function App() {
                 )}
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
-                  <div className="lg:col-span-2 space-y-8">
+                  <div className="order-1 lg:order-none lg:col-span-2 space-y-8">
                     <div className="space-y-4">
                       <div className="flex items-center gap-2">
                         <TrendingUp className="w-4 h-4 opacity-40" aria-hidden="true" />
@@ -375,7 +495,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <aside className="space-y-8">
+                  <aside className="order-2 lg:order-none space-y-8">
                     <div className="sticky top-8">
                       <h3 className="font-mono text-xs uppercase tracking-[0.2em] mb-4 opacity-50">Betting Metrics</h3>
                       <BetCalculator

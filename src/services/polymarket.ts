@@ -1,4 +1,5 @@
 import { PolymarketEvent, Bucket, TweetProjection, ProjectionInsufficient } from '../types';
+import { isDateInPast } from '../utils/datetime';
 
 export async function searchMarkets(query: string): Promise<PolymarketEvent[]> {
   try {
@@ -7,6 +8,8 @@ export async function searchMarkets(query: string): Promise<PolymarketEvent[]> {
     const data = await response.json();
     
     // Filtrado estricto por TÍTULO del evento: "elon" y "tweets"
+    const nowMs = Date.now();
+
     return data
       .filter((e: PolymarketEvent) => {
         const title = e.title.toLowerCase();
@@ -15,7 +18,8 @@ export async function searchMarkets(query: string): Promise<PolymarketEvent[]> {
       .map((e: PolymarketEvent) => ({
         ...e,
         trackingId: e.trackingId || (e.markets?.[0] as unknown as Record<string, string>)?.trackingId
-      }));
+      }))
+      .filter((e: PolymarketEvent) => !isDateInPast(e.endDate, nowMs));
   } catch (error) {
     console.error('Error searching events:', error);
     return [];
@@ -29,6 +33,17 @@ export interface TrackingStats {
   startDate: string;
   endDate: string;
   title?: string;
+}
+
+function parseNumericField(value: unknown): number | undefined {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : undefined;
+  }
+  if (typeof value === 'string') {
+    const parsed = parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
 }
 
 export async function getActiveCounts(): Promise<TrackingStats[]> {
@@ -111,8 +126,9 @@ export function parseBuckets(event: PolymarketEvent): Bucket[] {
       if (market.closed) return;
       
       const outcomes = JSON.parse(market.outcomes);
-      const prices = JSON.parse(market.outcomePrices);
+      const outcomePrices = JSON.parse(market.outcomePrices);
       const tokenIds = JSON.parse(market.clobTokenIds);
+      const marketBestAsk = parseNumericField(market.bestAsk);
 
       // Caso 1: Mercado binario (Yes/No)
       // Extraemos el rango de la pregunta
@@ -137,7 +153,9 @@ export function parseBuckets(event: PolymarketEvent): Bucket[] {
         allBuckets.push({
           id: `${market.id}-${yesIndex}`,
           name: bucketName,
-          price: parseFloat(prices[yesIndex] || '0'),
+          price: marketBestAsk !== undefined && marketBestAsk > 0
+            ? marketBestAsk
+            : parseFloat(outcomePrices[yesIndex] || '0'),
           tokenId: tokenIds[yesIndex],
         });
       } 
@@ -147,7 +165,9 @@ export function parseBuckets(event: PolymarketEvent): Bucket[] {
           allBuckets.push({
             id: `${market.id}-${index}`,
             name,
-            price: parseFloat(prices[index] || '0'),
+            // Gamma only exposes market-level bestAsk, so for categorical outcomes
+            // we keep per-outcome prices as fallback until per-outcome ask is available.
+            price: parseFloat(outcomePrices[index] || '0'),
             tokenId: tokenIds[index],
           });
         });

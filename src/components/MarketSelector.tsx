@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { searchMarkets, TrackingStats } from '../services/polymarket';
 import { PolymarketEvent } from '../types';
 import { Loader2, DollarSign, TrendingUp, Users, Activity } from 'lucide-react';
+import { parseApiDateMs } from '../utils/datetime';
 
 interface MarketSelectorProps {
   onSelect: (market: PolymarketEvent) => void;
@@ -51,6 +52,26 @@ export function MarketSelector({ onSelect, activeCounts, onRefresh }: MarketSele
     return `$${value.toFixed(0)}`;
   };
 
+  const formatDateTime = (value?: string): string => {
+    const parsed = parseApiDateMs(value);
+    if (parsed === null) return 'TBD';
+    return new Date(parsed).toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  const visibleMarketsCount = React.useMemo(() => {
+    const nowMs = Date.now();
+    return markets.filter((market) => {
+      const stat = market.trackingId ? countsMap[market.trackingId] : undefined;
+      const endMs = parseApiDateMs(stat?.endDate) ?? parseApiDateMs(market.endDate);
+      return endMs === null || endMs > nowMs;
+    }).length;
+  }, [markets, countsMap]);
+
   if (loading && markets.length === 0) {
     return (
       <div
@@ -82,18 +103,29 @@ export function MarketSelector({ onSelect, activeCounts, onRefresh }: MarketSele
       </div>
 
       {(() => {
+        const nowMs = Date.now();
+        const getResolvedEndMs = (m: PolymarketEvent) => {
+          const stat = m.trackingId ? countsMap[m.trackingId] : undefined;
+          return parseApiDateMs(stat?.endDate) ?? parseApiDateMs(m.endDate);
+        };
+        const visibleMarkets = markets.filter(m => {
+          const endMs = getResolvedEndMs(m);
+          return endMs === null || endMs > nowMs;
+        });
         const getStartMs = (m: PolymarketEvent) => {
           const stat = m.trackingId ? countsMap[m.trackingId] : undefined;
-          return stat?.startDate ? new Date(stat.startDate).getTime() : new Date(m.endDate || 0).getTime();
+          return parseApiDateMs(stat?.startDate) ?? parseApiDateMs(m.endDate) ?? 0;
         };
         const getDurationDays = (m: PolymarketEvent) => {
           const stat = m.trackingId ? countsMap[m.trackingId] : undefined;
-          if (stat?.startDate && stat?.endDate) {
-            return (new Date(stat.endDate).getTime() - new Date(stat.startDate).getTime()) / 86400000;
+          const startMs = parseApiDateMs(stat?.startDate);
+          const endMs = parseApiDateMs(stat?.endDate);
+          if (startMs !== null && endMs !== null) {
+            return (endMs - startMs) / 86400000;
           }
           return 7; // default to weekly if unknown
         };
-        const sorted = [...markets].sort((a, b) => getStartMs(a) - getStartMs(b));
+        const sorted = [...visibleMarkets].sort((a, b) => getStartMs(a) - getStartMs(b));
         const weekly = sorted.filter(m => getDurationDays(m) >= 5);
         const shortTerm = sorted.filter(m => getDurationDays(m) < 5);
         const renderCard = (market: PolymarketEvent) => (
@@ -112,10 +144,11 @@ export function MarketSelector({ onSelect, activeCounts, onRefresh }: MarketSele
                   <span className="font-mono text-[10px] bg-ink/5 group-hover:bg-bg/10 px-2 py-1 rounded-sm uppercase tracking-wider">
                     {market.trackingId ? 'Live Tracking' : 'Standard'}
                   </span>
-                  {market.trackingId && countsMap[market.trackingId] !== undefined && (() => {
-                    const stat = countsMap[market.trackingId];
-                    const started = !stat.startDate || new Date(stat.startDate) <= new Date();
-                    return started ? (
+                    {market.trackingId && countsMap[market.trackingId] !== undefined && (() => {
+                      const stat = countsMap[market.trackingId];
+                      const startMs = parseApiDateMs(stat.startDate);
+                      const started = startMs === null || startMs <= nowMs;
+                      return started ? (
                       <span
                         className="font-mono text-[10px] text-ink group-hover:text-bg font-bold"
                         aria-live="polite"
@@ -126,7 +159,7 @@ export function MarketSelector({ onSelect, activeCounts, onRefresh }: MarketSele
                   })()}
                 </div>
                 <span className="font-mono text-[10px] opacity-50 uppercase tracking-widest">
-                  Ends: {market.endDate ? new Date(market.endDate).toLocaleDateString() : 'TBD'}
+                  Ends: {formatDateTime(market.endDate)}
                 </span>
               </div>
 
@@ -172,23 +205,21 @@ export function MarketSelector({ onSelect, activeCounts, onRefresh }: MarketSele
                     <span className="block font-mono text-[8px] uppercase opacity-40">Status</span>
                     {(() => {
                       const stat = market.trackingId ? countsMap[market.trackingId] : undefined;
-                      const started = !stat?.startDate || new Date(stat.startDate) <= new Date();
+                      const startMs = parseApiDateMs(stat?.startDate);
+                      const started = startMs === null || startMs <= nowMs;
                       if (!started) return (
                         <span className="block font-mono text-[10px] uppercase font-medium flex items-center gap-1.5">
                           <span className="relative flex h-2 w-2">
                             <span className="relative inline-flex rounded-full h-2 w-2 bg-ink/40 group-hover:bg-bg/40"></span>
                           </span>
                           <span className="opacity-50">
-                            Starting {new Date(stat!.startDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            Starting {formatDateTime(stat!.startDate)}
                           </span>
                         </span>
                       );
-                      const hoursElapsed = stat?.startDate ? (Date.now() - new Date(stat.startDate).getTime()) / 3600000 : 99;
-                      // Use xtracker endDate (precise) if available, else fall back to Gamma endDate + 16h offset
-                      const endMs = stat?.endDate
-                        ? new Date(stat.endDate).getTime()
-                        : market.endDate ? new Date(market.endDate).getTime() + 16 * 3600000 : null;
-                      const hoursUntilEnd = endMs ? (endMs - Date.now()) / 3600000 : 999;
+                      const hoursElapsed = startMs !== null ? (nowMs - startMs) / 3600000 : 99;
+                      const endMs = parseApiDateMs(stat?.endDate) ?? parseApiDateMs(market.endDate);
+                      const hoursUntilEnd = endMs !== null ? (endMs - nowMs) / 3600000 : 999;
                       // Warmup only if: early in the tracking period AND not ending within 8h
                       const warming = market.trackingId && hoursUntilEnd > 8 && (!stat || stat.total < 20 || hoursElapsed < 4);
                       return warming ? (
@@ -243,7 +274,7 @@ export function MarketSelector({ onSelect, activeCounts, onRefresh }: MarketSele
         );
       })()}
 
-      {markets.length === 0 && !loading && (
+      {visibleMarketsCount === 0 && !loading && (
         <div className="text-center py-20 border border-dashed border-ink/20" role="status">
           <p className="font-serif italic text-lg opacity-40">No active events found at the moment.</p>
         </div>
