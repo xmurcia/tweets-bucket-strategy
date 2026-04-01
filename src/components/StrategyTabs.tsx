@@ -197,8 +197,7 @@ export function StrategyTabs({ buckets, tweetProjection, budget, onApplyStrategy
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div>
+      <div className="space-y-2">
         <div className="mb-1 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <h3 className="font-mono text-xs uppercase tracking-[0.2em] opacity-50">Suggested strategies</h3>
           <button
@@ -296,16 +295,16 @@ export function StrategyTabs({ buckets, tweetProjection, budget, onApplyStrategy
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="grid grid-cols-3 border-b border-ink/20">
+      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+        <div className="grid grid-cols-3 border border-ink/10 bg-bg">
         {(Object.keys(TAB_META) as TabId[]).map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={`px-2 py-3 text-center font-mono text-[9px] uppercase tracking-wide transition-colors focus:outline-none focus:ring-2 focus:ring-ink sm:px-4 sm:text-[10px] sm:tracking-widest ${
               activeTab === tab
-                ? 'border-b-2 border-ink text-ink -mb-px'
-                : 'text-ink/40 hover:text-ink/70'
+                ? 'bg-ink text-bg'
+                : 'text-ink/40 hover:bg-ink/[0.03] hover:text-ink/70'
             }`}
             aria-selected={activeTab === tab}
             role="tab"
@@ -313,18 +312,34 @@ export function StrategyTabs({ buckets, tweetProjection, budget, onApplyStrategy
             {TAB_META[tab].label}
           </button>
         ))}
+        </div>
+
+        <div className="grid grid-cols-3 gap-3 border border-ink/10 bg-ink/[0.03] px-4 py-3 md:min-w-[21rem]">
+          <div>
+            <span className="block font-mono text-[9px] uppercase tracking-[0.18em] opacity-40">Coverage</span>
+            <span className="font-mono text-base font-bold">{formatPct(current.coverage)}</span>
+          </div>
+          <div>
+            <span className="block font-mono text-[9px] uppercase tracking-[0.18em] opacity-40">Min ROI</span>
+            <span className={`font-mono text-base font-bold ${roi > 0 ? 'text-positive' : roi < 0 ? 'text-negative' : 'text-neutral'}`}>
+              {roi > 0 ? '+' : ''}{roi.toFixed(0)}%
+            </span>
+          </div>
+          <div>
+            <span className="block font-mono text-[9px] uppercase tracking-[0.18em] opacity-40">Buckets</span>
+            <span className="font-mono text-base font-bold">{current.selected.length}</span>
+          </div>
+        </div>
       </div>
 
-      {/* Tab content */}
       <div role="tabpanel" className="space-y-4">
-        {/* Description */}
-        <p className="text-xs font-mono opacity-50 uppercase tracking-wider">
+        <p className="border-l-2 border-ink/20 pl-3 text-xs font-mono uppercase tracking-wider opacity-50">
           {TAB_META[activeTab].sublabel}
         </p>
 
         {/* Silence tab: explain the thesis */}
         {activeTab === 'silence' && currentCount !== undefined && tweetProjection && (
-          <div className="border border-ink/20 p-3 text-xs font-mono space-y-1">
+          <div className="space-y-1 border border-ink/20 bg-ink/[0.03] p-3 text-xs font-mono">
             <p className="opacity-70">
               Current: <span className="font-bold text-ink">{currentCount} tweets</span> ·
               Pace: <span className="font-bold">{tweetProjection.tweetsPerHour.toFixed(1)}/hr</span>
@@ -341,7 +356,7 @@ export function StrategyTabs({ buckets, tweetProjection, budget, onApplyStrategy
 
         {/* Longshot tab: explain the thesis */}
         {activeTab === 'longshot' && (
-          <div className="border border-ink/20 p-3 text-xs font-mono space-y-1">
+          <div className="space-y-1 border border-ink/20 bg-ink/[0.03] p-3 text-xs font-mono">
             <p className="opacity-50">
               Low market price but meaningful projected probability.
               High upside if correct — market underprices these buckets relative to projection.
@@ -356,9 +371,9 @@ export function StrategyTabs({ buckets, tweetProjection, budget, onApplyStrategy
 
         {/* Bucket list */}
         {current.selected.length > 0 ? (
-          <div className="border border-ink/10">
+          <div className="border border-ink/10 bg-bg">
             <div className="hidden md:block">
-              <div className="grid grid-cols-12 border-b border-ink/10 px-4 py-2 font-mono text-[9px] uppercase tracking-wider opacity-40">
+              <div className="grid grid-cols-12 border-b border-ink/10 bg-ink/[0.03] px-4 py-3 font-mono text-[9px] uppercase tracking-wider opacity-40">
                 <span className="col-span-3">Bucket</span>
                 <span className="col-span-2 text-right">Market</span>
                 {tweetProjection && <span className="col-span-2 text-right">Proj.</span>}
@@ -379,7 +394,7 @@ export function StrategyTabs({ buckets, tweetProjection, budget, onApplyStrategy
                 return (
                   <div
                     key={b.id}
-                    className="grid grid-cols-12 items-center border-b border-ink/5 px-4 py-3 text-sm last:border-0"
+                    className="grid grid-cols-12 items-center border-b border-ink/5 px-4 py-3 text-sm transition-colors last:border-0 hover:bg-ink/[0.02]"
                   >
                     <span className="col-span-3 font-mono font-bold">{b.name}</span>
                     <span className="col-span-2 text-right font-mono">{formatPct(b.price)}</span>
@@ -404,8 +419,8 @@ export function StrategyTabs({ buckets, tweetProjection, budget, onApplyStrategy
               })}
             </div>
 
-            <div className="divide-y divide-ink/5 md:hidden">
-              {current.selected.map(b => {
+              <div className="divide-y divide-ink/5 md:hidden">
+                {current.selected.map(b => {
                 const payout = perBucketBudget / b.price;
                 const ev = b.projectedProb !== undefined
                   ? (b.projectedProb / b.price) - 1
@@ -415,7 +430,7 @@ export function StrategyTabs({ buckets, tweetProjection, budget, onApplyStrategy
                   : null;
                 const kellyStake = kelly !== null ? kelly * budget : null;
                 return (
-                  <div key={b.id} className="space-y-3 px-3 py-3">
+                  <div key={b.id} className="space-y-3 px-4 py-3">
                     <div className="flex items-center justify-between gap-3">
                       <span className="font-mono text-sm font-bold break-words">{b.name}</span>
                       <span className="font-mono text-xs opacity-60">Mkt {formatPct(b.price)}</span>
@@ -447,7 +462,7 @@ export function StrategyTabs({ buckets, tweetProjection, budget, onApplyStrategy
 
         {/* Summary row */}
         {current.selected.length > 0 && (
-          <div className="space-y-4 border-t border-ink/10 pt-2 md:flex md:items-end md:justify-between md:space-y-0">
+          <div className="space-y-4 border-t border-ink/10 pt-4 md:flex md:items-end md:justify-between md:space-y-0">
             <div className="space-y-1">
               <div className="grid grid-cols-3 gap-3 md:flex md:gap-6">
                 <div>
@@ -468,7 +483,7 @@ export function StrategyTabs({ buckets, tweetProjection, budget, onApplyStrategy
             </div>
             <button
               onClick={handleApply}
-              className="w-full bg-ink px-4 py-2 font-mono text-[10px] uppercase tracking-widest text-bg transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-ink focus:ring-offset-2 md:w-auto"
+              className="w-full bg-ink px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-bg transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-ink focus:ring-offset-2 md:w-auto"
             >
               Apply selection ↓
             </button>

@@ -38,4 +38,14 @@ body {
   color: var(--ink);
   font-family: var(--font-sans);
   transition: background-color 0.2s, color 0.2s;
+  line-height: 1.5;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+::selection {
+  background-color: var(--ink);
+  color: var(--bg);
 }

@@ -221,6 +221,7 @@ export default function App() {
   const autoRefreshSecondsLeft = nextAutoRefreshAt ? Math.max(0, Math.ceil((nextAutoRefreshAt - nowMs) / 1000)) : null;
   const manualCooldownSecondsLeft = manualCooldownUntil ? Math.max(0, Math.ceil((manualCooldownUntil - nowMs) / 1000)) : 0;
   const manualRefreshDisabled = !selectedMarket || isManualRefreshing || manualCooldownSecondsLeft > 0;
+  const selectedCoverage = selectedBuckets.reduce((sum, bucket) => sum + bucket.price, 0);
 
   const formatRemainingTime = (seconds: number) => {
     if (seconds < 60) return `${seconds}s`;
@@ -242,168 +243,319 @@ export default function App() {
     ? 'Next refresh in -- (select market)'
     : `Next refresh in ${formatRemainingTime(autoRefreshSecondsLeft ?? 0)}`;
 
+  const marketStartDate = currentStats?.startDate || tweetProjection?.periodStart;
+  const marketStarted = !marketStartDate || new Date(marketStartDate) <= new Date();
+  const detailStatus = !selectedMarket
+    ? null
+    : !marketStarted
+      ? {
+          label: 'Scheduled',
+          tone: 'border-ink/15 bg-bg text-ink/70',
+          detail: `Starts ${new Date(marketStartDate!).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`,
+        }
+      : projectionInsufficient
+        ? {
+            label: 'Warmup',
+            tone: 'border-warning/30 bg-warning/10 text-warning',
+            detail: `${projectionInsufficient.currentCount.toLocaleString()} tweets so far`,
+          }
+        : {
+            label: 'Live analysis',
+            tone: 'border-positive/30 bg-positive/10 text-positive',
+            detail: tweetProjection
+              ? `Projected total ~${Math.round(tweetProjection.projectedTotal)}`
+              : currentStats
+                ? `${currentStats.total.toLocaleString()} tweets tracked`
+                : 'Awaiting tracking data',
+          };
+
+  const startedStats = currentStats || tweetProjection || projectionInsufficient;
+
   return (
-    <div className="min-h-screen max-w-6xl mx-auto px-4 py-12 md:py-20">
-      <header className="mb-12 md:mb-20 space-y-4">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <h1 className="text-5xl md:text-7xl font-serif italic tracking-tighter">
-            Musk <span className="not-italic font-sans font-bold uppercase text-2xl md:text-4xl tracking-normal">Oracle</span>
-          </h1>
-          <div className="flex w-full justify-end sm:w-auto">
-            <div className="flex w-full flex-col items-end sm:w-auto">
-              <div className="flex w-full items-center justify-between gap-2 border border-ink/20 px-2 py-1.5 sm:w-auto">
-                <div className="min-w-0 font-mono text-[10px] uppercase tracking-widest opacity-70 whitespace-nowrap">
+    <div className="min-h-screen bg-bg">
+      <div className="mx-auto flex min-h-screen max-w-7xl flex-col px-4 py-8 md:px-6 md:py-10">
+        <header className="mb-10 space-y-5 border border-ink/10 bg-ink/[0.03] px-4 py-5 md:mb-12 md:px-6 md:py-6">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center gap-3">
+                <span className="border border-ink/15 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.28em] opacity-60">
+                  Polymarket bucket workspace
+                </span>
+                <span className="font-mono text-[10px] uppercase tracking-[0.24em] opacity-40">
+                  Elon tweet markets only
+                </span>
+              </div>
+                <div className="space-y-2.5">
+                  <h1 className="text-4xl font-serif italic leading-none tracking-tight md:text-5xl">
+                    Musk <span className="not-italic font-sans text-xl font-bold uppercase tracking-[0.18em] md:text-2xl">Oracle</span>
+                  </h1>
+                  <p className="max-w-2xl text-sm leading-6 text-ink/65 md:text-base">
+                    Editorial-grade read on live tweet-count markets. Pick the event, read the pace, then shape a tighter bucket coverage position with less guesswork.
+                  </p>
+                </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] lg:min-w-[26rem]">
+              <div className="border border-ink/10 bg-bg px-4 py-3">
+                <div className="font-mono text-[9px] uppercase tracking-[0.24em] opacity-45">Control room</div>
+                <div className="mt-2 font-mono text-[11px] uppercase tracking-[0.16em] text-ink/75">
                   {manualCooldownSecondsLeft > 0
                     ? `${nextRefreshLabel} · Manual in ${formatRemainingTime(manualCooldownSecondsLeft)}`
                     : nextRefreshLabel}
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => {
-                      void handleManualRefresh();
-                    }}
-                    disabled={manualRefreshDisabled}
-                    aria-label={isManualRefreshing ? 'Refreshing market detail' : 'Refresh market detail'}
-                    className="p-2 border border-ink/20 hover:bg-ink hover:text-bg transition-colors focus:outline-none focus:ring-2 focus:ring-ink disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    <RotateCw className={`w-3.5 h-3.5 ${isManualRefreshing ? 'animate-spin' : ''}`} />
-                  </button>
-                  <button
-                    onClick={toggleTheme}
-                    aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
-                    className="p-2 border border-ink/20 hover:bg-ink hover:text-bg transition-colors focus:outline-none focus:ring-2 focus:ring-ink"
-                  >
-                    {dark ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
-                  </button>
+                <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <div className="font-mono text-[9px] uppercase tracking-[0.2em] opacity-40">Market</div>
+                    <div className="mt-1 font-medium">{selectedMarket ? 'Detail active' : 'Selection mode'}</div>
+                  </div>
+                  <div>
+                    <div className="font-mono text-[9px] uppercase tracking-[0.2em] opacity-40">Selection</div>
+                    <div className="mt-1 font-medium">{selectedBuckets.length} buckets</div>
+                  </div>
                 </div>
+              </div>
+
+              <div className="flex items-stretch gap-2 self-start">
+                <button
+                  onClick={() => {
+                    void handleManualRefresh();
+                  }}
+                  disabled={manualRefreshDisabled}
+                  aria-label={isManualRefreshing ? 'Refreshing market detail' : 'Refresh market detail'}
+                  className="flex h-12 w-12 items-center justify-center border border-ink/15 bg-bg transition-colors hover:bg-ink hover:text-bg focus:outline-none focus:ring-2 focus:ring-ink disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <RotateCw className={`h-4 w-4 ${isManualRefreshing ? 'animate-spin' : ''}`} />
+                </button>
+                <button
+                  onClick={toggleTheme}
+                  aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+                  className="flex h-12 w-12 items-center justify-center border border-ink/15 bg-bg transition-colors hover:bg-ink hover:text-bg focus:outline-none focus:ring-2 focus:ring-ink"
+                >
+                  {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                </button>
               </div>
             </div>
           </div>
-          </div>
-        <div className="h-px bg-ink w-full" />
-      </header>
+          <div className="h-px w-full bg-ink/10" />
+        </header>
 
-      <main>
-        <AnimatePresence mode="wait">
-          {!selectedMarket ? (
-            <motion.section
-              key="selector"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="space-y-8"
-            >
-              <div className="flex items-center gap-4 text-ink/60">
-                <Info className="w-4 h-4" aria-hidden="true" />
-                <p className="font-serif italic text-lg">
-                  Select an active categorical event to begin analyzing bucket coverage strategies.
-                </p>
-              </div>
-              <MarketSelector 
-                onSelect={handleMarketSelect} 
-                activeCounts={activeCounts}
-                onRefresh={loadActiveCounts}
-              />
-            </motion.section>
-          ) : (
-            <motion.section
-              key="analysis"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              className="space-y-12"
-            >
-              <div className="space-y-8">
-                <div className="flex items-center gap-4">
-                  <button
-                    onClick={() => setSelectedMarket(null)}
-                    className="p-2 border border-ink/20 hover:bg-ink hover:text-bg transition-colors focus:outline-none focus:ring-2 focus:ring-ink"
-                    aria-label="Go back to market selection"
-                  >
-                    <ArrowLeft className="w-4 h-4" aria-hidden="true" />
-                  </button>
-                  <div className="flex-1">
-                    <h2 className="text-2xl md:text-4xl font-serif italic leading-tight">
-                      {selectedMarket.title}
-                    </h2>
-                    {(currentStats || tweetProjection || projectionInsufficient) && (() => {
-                      const startDate = currentStats?.startDate || tweetProjection?.periodStart;
-                      const started = !startDate || new Date(startDate) <= new Date();
-                      if (!started) return (
-                        <div className="mt-2 flex items-center gap-2" aria-live="polite">
-                          <span className="font-mono text-sm uppercase tracking-wider opacity-50">
-                            Starts {new Date(startDate!).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </div>
-                      );
-                      if (projectionInsufficient) return (
-                        <div className="mt-2 flex items-center gap-2" aria-live="polite">
-                          <span className="w-2 h-2 rounded-full animate-pulse bg-warning" aria-hidden="true" />
-                          <span className="font-mono text-sm font-bold uppercase tracking-wider text-warning">
-                            Warmup — {projectionInsufficient.currentCount.toLocaleString()} tweets
-                          </span>
-                        </div>
-                      );
-                      return null;
-                    })()}
+        <main>
+          <AnimatePresence mode="wait">
+            {!selectedMarket ? (
+              <motion.section
+                key="selector"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="space-y-8"
+              >
+                <div className="space-y-5 border border-ink/10 bg-ink px-5 py-6 text-bg md:px-6 md:py-7">
+                  <div className="flex items-center gap-3 text-bg/70">
+                    <Info className="h-4 w-4" aria-hidden="true" />
+                    <span className="font-mono text-[10px] uppercase tracking-[0.24em]">Start with the market</span>
+                  </div>
+                  <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)] xl:items-end">
+                    <div>
+                      <h2 className="max-w-3xl font-serif text-3xl italic leading-tight md:text-4xl">
+                        Choose the active event, then move straight into bucket selection and payoff shaping.
+                      </h2>
+                      <p className="mt-4 max-w-2xl text-sm leading-6 text-bg/72 md:text-base">
+                        The interface is tuned for one decision flow: scan the event, understand the live pace, apply a strategy, then tighten the exact buckets you want to own.
+                      </p>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+                      <div className="border border-bg/15 bg-bg/6 px-4 py-4">
+                        <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-bg/45">Universe</div>
+                        <div className="mt-2 text-3xl font-semibold tabular-nums">{activeCounts.length}</div>
+                        <p className="mt-2 text-sm text-bg/62">Tracked markets currently visible to the workspace.</p>
+                      </div>
+                      <div className="border border-bg/15 bg-bg/6 px-4 py-4">
+                        <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-bg/45">Mode</div>
+                        <div className="mt-2 text-lg font-medium">Coverage analysis</div>
+                        <p className="mt-2 text-sm text-bg/62">Built around categorical buckets, not generic trading screens.</p>
+                      </div>
+                      <div className="border border-bg/15 bg-bg/6 px-4 py-4">
+                        <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-bg/45">Workflow</div>
+                        <div className="mt-2 text-lg font-medium">Select -&gt; Model -&gt; Refine</div>
+                        <p className="mt-2 text-sm text-bg/62">Automatic strategies are the starting point, not the final answer.</p>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
-                {(currentStats || tweetProjection || projectionInsufficient) && (() => {
-                  const startDate = currentStats?.startDate || tweetProjection?.periodStart;
-                  const started = !startDate || new Date(startDate) <= new Date();
-                  if (!started) return null;
-                  if (projectionInsufficient) return (
-                    <motion.div
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 0.2 }}
-                      className="border border-warning/40 p-4 flex items-center gap-3"
-                    >
-                      <span className="relative flex h-2.5 w-2.5 shrink-0">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-warning"></span>
-                      </span>
-                      <div>
-                        <span className="font-mono text-[10px] uppercase tracking-widest text-warning block">Not enough reliable data</span>
-                        <span className="font-mono text-xs opacity-60">
-                          {projectionInsufficient.currentCount} tweets in {Math.max(0, projectionInsufficient.hoursElapsed).toFixed(1)}h — projections available after 4h / 20 tweets
-                        </span>
+                <MarketSelector
+                  onSelect={handleMarketSelect}
+                  activeCounts={activeCounts}
+                  onRefresh={loadActiveCounts}
+                />
+              </motion.section>
+            ) : (
+              <motion.section
+                key="analysis"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="space-y-8 md:space-y-10"
+              >
+                <section className="border border-ink/10 bg-ink text-bg">
+                  <div className="grid gap-4 px-5 py-4 md:px-6 md:py-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(20rem,0.75fr)]">
+                    <div className="space-y-4">
+                      <div className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center">
+                        <button
+                          onClick={() => setSelectedMarket(null)}
+                          className="inline-flex min-h-10 items-center justify-center gap-2.5 border border-bg bg-bg px-4 py-2.5 font-mono text-[11px] uppercase tracking-[0.18em] text-ink transition-colors hover:bg-transparent hover:text-bg focus:outline-none focus:ring-2 focus:ring-bg sm:justify-start"
+                          aria-label="Go back to market selection"
+                        >
+                          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                          Back to all markets
+                        </button>
+                        {detailStatus && (
+                          <div className={`inline-flex items-center gap-2 border px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.2em] ${detailStatus.tone}`}>
+                            <span>{detailStatus.label}</span>
+                            <span className="opacity-70">{detailStatus.detail}</span>
+                          </div>
+                        )}
                       </div>
-                    </motion.div>
-                  );
+
+                      <div className="space-y-2">
+                        <h2 className="max-w-4xl font-serif text-2xl italic leading-snug md:text-4xl">
+                          {selectedMarket.title}
+                        </h2>
+                        <p className="max-w-3xl text-sm leading-6 text-bg/68 md:text-[15px]">
+                          Read the live signal first, then pressure-test the strategy suggestions before you commit your own exact bucket mix.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="border border-bg/20 bg-bg px-4 py-3.5 text-ink">
+                        <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <div className="font-mono text-[10px] uppercase tracking-[0.22em] opacity-45">Support this workspace</div>
+                            <div className="mt-1.5 text-base font-medium leading-6">Keep the analysis alive if this screen is helping you make better entries.</div>
+                            <p className="mt-1.5 text-sm text-ink/62">Support is promoted here on purpose so it is visible at decision time, not buried after the sizing rail.</p>
+                          </div>
+                          <div className="border border-ink/15 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-ink/58">
+                            Polygon USDC
+                          </div>
+                        </div>
+                        <div className="mt-3 grid gap-2.5">
+                          <a
+                            href="https://polymarket.com/@polete"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="group flex items-center justify-between gap-3 border border-ink bg-ink px-4 py-2.5 font-mono text-[10px] uppercase tracking-[0.18em] text-bg transition-colors hover:bg-bg hover:text-ink focus:outline-none focus:ring-2 focus:ring-ink"
+                          >
+                            <span className="flex flex-col gap-0.5 text-left">
+                              <span>@polete on Polymarket</span>
+                              <span className="normal-case text-[11px] tracking-normal opacity-75">Send a tip where the trading context already lives</span>
+                            </span>
+                            <span aria-hidden="true">→</span>
+                          </a>
+                          <div className="flex flex-col gap-2.5 border border-ink/15 bg-ink/[0.04] px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <span className="block font-mono text-[10px] uppercase tracking-[0.18em] opacity-45">Wallet</span>
+                              <span className="mt-1 block font-mono text-sm tracking-[0.08em]" title={TIPS_ADDRESS}>{truncatedAddress}</span>
+                            </div>
+                            <button
+                              onClick={handleCopyAddress}
+                              aria-label="Copy wallet address"
+                              className="inline-flex items-center justify-center gap-1.5 border border-ink/20 bg-bg px-3 py-2 font-mono text-[10px] uppercase tracking-[0.18em] text-ink transition-colors hover:bg-ink hover:text-bg focus:outline-none focus:ring-2 focus:ring-ink"
+                            >
+                              {copied ? (
+                                <span>Copied</span>
+                              ) : (
+                                <>
+                                  <Copy className="h-3 w-3" aria-hidden="true" />
+                                  <span>Copy address</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+                        <div className="border border-bg/15 px-4 py-4">
+                          <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-bg/45">Buckets selected</div>
+                          <div className="mt-2 text-3xl font-semibold tabular-nums">{selectedBuckets.length}</div>
+                          <div className="mt-2 font-mono text-[11px] uppercase tracking-[0.18em] text-bg/55">Coverage {(selectedCoverage * 100).toFixed(1)}%</div>
+                        </div>
+                        <div className="border border-bg/15 px-4 py-4">
+                          <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-bg/45">Budget</div>
+                          <div className="mt-2 text-3xl font-semibold tabular-nums">${budget.toFixed(0)}</div>
+                          <div className="mt-2 text-sm text-bg/60">Adjustable in the action rail</div>
+                        </div>
+                        <div className="border border-bg/15 px-4 py-4">
+                          <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-bg/45">Decision flow</div>
+                          <div className="mt-2 text-lg font-medium">Signal -&gt; Strategy -&gt; Sizing</div>
+                          <div className="mt-2 text-sm text-bg/60">Everything below is arranged in that order.</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                {startedStats && marketStarted && (() => {
+                  if (projectionInsufficient) {
+                    return (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.2 }}
+                        className="flex items-center gap-3 border border-warning/40 bg-warning/10 px-4 py-4"
+                      >
+                        <span className="relative flex h-2.5 w-2.5 shrink-0">
+                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-warning opacity-75"></span>
+                          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-warning"></span>
+                        </span>
+                        <div>
+                          <span className="block font-mono text-[10px] uppercase tracking-widest text-warning">Not enough reliable data</span>
+                          <span className="font-mono text-xs opacity-60">
+                            {projectionInsufficient.currentCount} tweets in {Math.max(0, projectionInsufficient.hoursElapsed).toFixed(1)}h - projections available after 4h / 20 tweets
+                          </span>
+                        </div>
+                      </motion.div>
+                    );
+                  }
+
                   return (
                     <motion.div
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: 0.2 }}
-                      className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch"
+                      className="grid items-stretch gap-6 xl:grid-cols-[minmax(0,1.7fr)_minmax(20rem,0.9fr)]"
                     >
-                      <div className="lg:col-span-2">
+                      <div>
                         <StatsModule
                           stats={currentStats ?? { id: tweetProjection!.trackingId, total: tweetProjection!.currentCount, daysElapsed: tweetProjection!.hoursElapsed / 24, startDate: tweetProjection!.periodStart, endDate: tweetProjection!.periodEnd }}
                           tweetProjection={tweetProjection}
                           buckets={buckets}
                         />
                       </div>
-                      <div className="flex flex-col justify-between h-full gap-4">
+
+                      <div className="flex h-full flex-col gap-4">
                         {tweetProjection && tweetProjection.rangeProbabilities.length > 0 && (
-                          <div className="p-4 border border-ink/10 space-y-3">
-                            <span className="font-mono text-[10px] uppercase tracking-widest opacity-50 block">Top projected buckets</span>
+                          <div className="space-y-4 border border-ink/10 bg-ink/[0.03] p-5">
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="block font-mono text-[10px] uppercase tracking-[0.22em] opacity-50">Top projected buckets</span>
+                              <span className="font-mono text-[10px] uppercase tracking-[0.16em] opacity-35">Highest model probability</span>
+                            </div>
                             <div className="space-y-2">
                               {[...tweetProjection.rangeProbabilities]
                                 .sort((a, b) => b.probability - a.probability)
                                 .slice(0, 3)
                                 .map((rp, i) => (
-                                  <div key={rp.range} className="flex items-center gap-2">
-                                    <span className="font-mono text-[10px] opacity-30 w-3">{i + 1}</span>
+                                  <div key={rp.range} className="flex items-center gap-3 border border-ink/8 bg-bg px-3 py-3">
+                                    <span className="w-5 font-mono text-[10px] opacity-30">{i + 1}</span>
                                     <div className="flex-1">
-                                      <div className="flex justify-between mb-0.5">
+                                      <div className="mb-1 flex justify-between">
                                         <span className="font-mono text-xs font-bold">{rp.range}</span>
                                         <span className="font-mono text-xs">{(rp.probability * 100).toFixed(1)}%</span>
                                       </div>
-                                      <div className="w-full bg-ink/10 h-1">
-                                        <div className="bg-ink h-full" style={{ width: `${Math.min(100, rp.probability * 100)}%` }} />
+                                      <div className="h-1.5 w-full bg-ink/10">
+                                        <div className="h-full bg-ink" style={{ width: `${Math.min(100, rp.probability * 100)}%` }} />
                                       </div>
                                     </div>
                                   </div>
@@ -411,51 +563,34 @@ export default function App() {
                             </div>
                           </div>
                         )}
-                        <div className="p-4 border border-dashed border-ink/20 space-y-3">
-                          <h4 className="font-mono text-[10px] uppercase tracking-widest">Support the analyst</h4>
+
+                        <div className="space-y-4 border border-ink/10 p-5">
+                          <div>
+                            <h4 className="font-mono text-[10px] uppercase tracking-[0.22em] opacity-55">Market context</h4>
+                            <p className="mt-2 text-sm leading-6 text-ink/62">
+                              Operational links stay near the signal so the action rail can stay focused on actual position construction.
+                            </p>
+                          </div>
                           {selectedMarket.slug && (
                             <a
                               href={`https://polymarket.com/event/${selectedMarket.slug}`}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="block font-mono text-[10px] uppercase tracking-widest opacity-50 hover:opacity-100 hover:underline transition-opacity"
+                              className="inline-flex items-center gap-2 border border-ink/15 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] opacity-70 transition-colors hover:bg-ink hover:text-bg focus:outline-none focus:ring-2 focus:ring-ink"
                             >
                               View on Polymarket →
                             </a>
                           )}
-                          <a
-                            href="https://polymarket.com/@polete"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="group flex items-center justify-between gap-2 rounded-sm border border-ink bg-ink text-bg px-3 py-2 font-mono text-[10px] uppercase tracking-widest transition-colors hover:bg-bg hover:text-ink focus:outline-none focus:ring-2 focus:ring-ink"
-                          >
-                            <span className="flex flex-col gap-0.5">
-                              <span>@polete on Polymarket</span>
-                              <span className="normal-case text-[9px] tracking-wide opacity-80">Leave me a tip on Polymarket</span>
-                            </span>
-                            <span aria-hidden="true">→</span>
-                          </a>
-                          <div className="rounded-md border border-ink/30 bg-ink text-bg p-3 space-y-2">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="font-mono text-[10px] uppercase tracking-widest block opacity-80">Tips (Polygon USDC)</span>
-                              <span className="font-mono text-[9px] uppercase tracking-widest border border-bg/30 px-1.5 py-0.5">Wallet</span>
+                          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                            <div className="border border-ink/10 bg-ink/[0.03] px-4 py-4">
+                              <div className="font-mono text-[10px] uppercase tracking-[0.2em] opacity-45">Source</div>
+                              <div className="mt-2 text-lg font-medium">Live market + tracker data</div>
+                              <p className="mt-2 text-sm text-ink/60">Use this to validate whether the current market shape is keeping up with tweet pace.</p>
                             </div>
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="font-mono text-xs tracking-wide" title={TIPS_ADDRESS}>{truncatedAddress}</span>
-                              <button
-                                onClick={handleCopyAddress}
-                                aria-label="Copy wallet address"
-                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-bg/30 bg-bg text-ink hover:bg-transparent hover:text-bg transition-colors focus:outline-none focus:ring-2 focus:ring-bg"
-                              >
-                                {copied ? (
-                                  <span className="font-mono text-[9px] uppercase tracking-widest">Copied!</span>
-                                ) : (
-                                  <>
-                                    <Copy className="w-3 h-3" aria-hidden="true" />
-                                    <span className="font-mono text-[9px] uppercase tracking-widest">Copy</span>
-                                  </>
-                                )}
-                              </button>
+                            <div className="border border-ink/10 bg-ink/[0.03] px-4 py-4">
+                              <div className="font-mono text-[10px] uppercase tracking-[0.2em] opacity-45">Action</div>
+                              <div className="mt-2 text-lg font-medium">Move to strategy below</div>
+                              <p className="mt-2 text-sm text-ink/60">Suggested coverage comes first, manual bucket overrides come right after.</p>
                             </div>
                           </div>
                         </div>
@@ -469,7 +604,7 @@ export default function App() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.3 }}
-                    className="border border-ink/10 p-6"
+                    className="border border-ink/10 bg-ink/[0.02] p-5 md:p-6"
                   >
                     <StrategyTabs
                       buckets={buckets}
@@ -480,42 +615,54 @@ export default function App() {
                   </motion.div>
                 )}
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
-                  <div className="order-1 lg:order-none lg:col-span-2 space-y-8">
-                    <div className="space-y-4">
-                      <div className="flex items-center gap-2">
-                        <TrendingUp className="w-4 h-4 opacity-40" aria-hidden="true" />
-                        <h3 className="font-mono text-xs uppercase tracking-[0.2em] opacity-50">Available Buckets</h3>
+                <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(0,1.55fr)_minmax(21rem,0.7fr)] xl:items-start">
+                  <div className="order-1 space-y-6">
+                    <section className="space-y-4 border border-ink/10 p-5 md:p-6">
+                      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                        <div className="flex items-center gap-2">
+                          <TrendingUp className="h-4 w-4 opacity-40" aria-hidden="true" />
+                          <h3 className="font-mono text-xs uppercase tracking-[0.2em] opacity-50">Bucket board</h3>
+                        </div>
+                        <p className="max-w-2xl text-sm text-ink/58">
+                          Scan the market top-to-bottom, then tap the exact outcomes you want in the rail. Selection state is intentionally louder than the surrounding table.
+                        </p>
                       </div>
                       <BucketList
                         buckets={buckets}
                         selectedIds={selectedBucketIds}
                         onToggle={handleToggleBucket}
                       />
-                    </div>
+                    </section>
                   </div>
 
-                  <aside className="order-2 lg:order-none space-y-8">
-                    <div className="sticky top-8">
-                      <h3 className="font-mono text-xs uppercase tracking-[0.2em] mb-4 opacity-50">Betting Metrics</h3>
+                  <aside className="order-2">
+                    <div className="sticky top-6 space-y-5 xl:top-8">
+                      <div className="border border-ink/10 bg-ink px-5 py-4 text-bg">
+                        <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-bg/45">Action rail</div>
+                        <div className="mt-2 text-xl font-medium">Size the position, then sanity-check the selected spread.</div>
+                      </div>
+
                       <BetCalculator
                         selectedBuckets={selectedBuckets}
                         budget={budget}
                         onBudgetChange={setBudget}
                       />
-                      
-                      <div className="mt-8 p-4 border border-dashed border-ink/20 rounded-sm space-y-3">
-                        <h4 className="font-mono text-[10px] uppercase tracking-widest">Strategy Viability</h4>
+
+                      <div className="space-y-4 border border-ink/10 bg-ink/[0.03] p-5">
+                        <div>
+                          <h4 className="font-mono text-[10px] uppercase tracking-[0.22em] opacity-55">Strategy viability</h4>
+                          <p className="mt-2 text-sm text-ink/58">A quick read on whether the current bucket mix is broad enough to behave like coverage or narrow enough to behave like a punt.</p>
+                        </div>
                         {selectedBuckets.length > 0 ? (
                           <div className="space-y-4">
-                            <p className="text-sm italic font-serif">
-                              {selectedBuckets.reduce((sum, b) => sum + b.price, 0) > 0.8 
-                                ? "High coverage strategy. Low risk, but lower potential profit."
-                                : "Selective strategy. Higher risk, requires specific outcomes to hit."}
+                            <p className="font-serif text-base italic leading-6">
+                              {selectedCoverage > 0.8
+                                ? 'High coverage strategy. Low risk, but lower potential profit.'
+                                : 'Selective strategy. Higher risk, requires specific outcomes to hit.'}
                             </p>
                             {currentStats && (
-                              <div className="pt-4 border-t border-ink/10">
-                                <span className="font-mono text-[10px] uppercase opacity-50 block mb-2">Distance to Buckets</span>
+                              <div className="border-t border-ink/10 pt-4">
+                                <span className="mb-3 block font-mono text-[10px] uppercase tracking-[0.18em] opacity-50">Distance to buckets</span>
                                 <div className="space-y-2">
                                   {selectedBuckets.map(b => {
                                     const match = b.name.match(/(\d+)/);
@@ -523,11 +670,9 @@ export default function App() {
                                     const target = parseInt(match[0]);
                                     const diff = target - currentStats.total;
                                     return (
-                                      <div key={b.id} className="flex justify-between text-[10px] font-mono">
+                                      <div key={b.id} className="flex items-center justify-between gap-3 border border-ink/8 bg-bg px-3 py-2 font-mono text-[10px] uppercase tracking-[0.14em]">
                                         <span>{b.name}</span>
-                                        <span className="text-ink">
-                                          {diff > 0 ? `+${diff} needed` : "✓ Passed"}
-                                        </span>
+                                        <span className="text-ink/72">{diff > 0 ? `+${diff} needed` : 'Passed'}</span>
                                       </div>
                                     );
                                   })}
@@ -536,69 +681,31 @@ export default function App() {
                             )}
                           </div>
                         ) : (
-                          <p className="text-sm italic font-serif opacity-50">
+                          <p className="font-serif text-sm italic opacity-50">
                             Select buckets to see viability analysis.
                           </p>
                         )}
                       </div>
 
-                      <div className="mt-8 p-4 border border-dashed border-ink/20 rounded-sm space-y-3">
-                        <h4 className="font-mono text-[10px] uppercase tracking-widest">Support the analyst</h4>
-                        <a
-                          href="https://polymarket.com/@polete"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="group flex items-center justify-between gap-2 rounded-sm border border-ink bg-ink text-bg px-3 py-2 font-mono text-[10px] uppercase tracking-widest transition-colors hover:bg-bg hover:text-ink focus:outline-none focus:ring-2 focus:ring-ink"
-                        >
-                          <span className="flex flex-col gap-0.5">
-                            <span>@polete on Polymarket</span>
-                            <span className="normal-case text-[9px] tracking-wide opacity-80">Leave me a tip on Polymarket</span>
-                          </span>
-                          <span aria-hidden="true">→</span>
-                        </a>
-                        <div className="rounded-md border border-ink/30 bg-ink text-bg p-3 space-y-2">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-mono text-[10px] uppercase tracking-widest block opacity-80">Tips (Polygon USDC)</span>
-                            <span className="font-mono text-[9px] uppercase tracking-widest border border-bg/30 px-1.5 py-0.5">Wallet</span>
-                          </div>
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-mono text-xs tracking-wide" title={TIPS_ADDRESS}>{truncatedAddress}</span>
-                            <button
-                              onClick={handleCopyAddress}
-                              aria-label="Copy wallet address"
-                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-bg/30 bg-bg text-ink hover:bg-transparent hover:text-bg transition-colors focus:outline-none focus:ring-2 focus:ring-bg"
-                            >
-                              {copied ? (
-                                <span className="font-mono text-[9px] uppercase tracking-widest">Copied!</span>
-                              ) : (
-                                <>
-                                  <Copy className="w-3 h-3" aria-hidden="true" />
-                                  <span className="font-mono text-[9px] uppercase tracking-widest">Copy</span>
-                                </>
-                              )}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
                     </div>
                   </aside>
                 </div>
-              </div>
-            </motion.section>
-          )}
-        </AnimatePresence>
-      </main>
+              </motion.section>
+            )}
+          </AnimatePresence>
+        </main>
 
-      <footer className="mt-24 pt-8 border-t border-ink/10 flex flex-col md:flex-row justify-between items-center gap-4">
-        <div className="font-mono text-[10px] uppercase tracking-widest opacity-30">
-          Data provided by Polymarket Gamma API
-        </div>
-        <div className="flex gap-6 font-mono text-[10px] uppercase tracking-widest opacity-30">
-          <span>Real-time</span>
-          <span>Categorical</span>
-          <span>Analysis</span>
-        </div>
-      </footer>
+        <footer className="mt-16 flex flex-col items-start justify-between gap-4 border-t border-ink/10 pt-8 md:mt-20 md:flex-row md:items-center">
+          <div className="font-mono text-[10px] uppercase tracking-widest opacity-30">
+            Data provided by Polymarket Gamma API
+          </div>
+          <div className="flex gap-6 font-mono text-[10px] uppercase tracking-widest opacity-30">
+            <span>Real-time</span>
+            <span>Categorical</span>
+            <span>Analysis</span>
+          </div>
+        </footer>
+      </div>
     </div>
   );
 }
