@@ -1,6 +1,7 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { TrackingStats } from '../services/polymarket';
 import { TweetProjection, Bucket } from '../types';
+import { parseApiDateMs } from '../utils/datetime';
 
 interface StatsModuleProps {
   stats: TrackingStats;
@@ -17,6 +18,37 @@ interface ContrarianZone {
 }
 
 export function StatsModule({ stats, tweetProjection, buckets = [] }: StatsModuleProps) {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  const countdownTargetMs = useMemo(() => {
+    if (!stats.endDate) return null;
+    return parseApiDateMs(stats.endDate);
+  }, [stats.endDate]);
+
+  useEffect(() => {
+    if (countdownTargetMs === null) return;
+
+    const intervalId = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [countdownTargetMs]);
+
+  const countdown = useMemo(() => {
+    if (countdownTargetMs === null) return null;
+
+    const totalSeconds = Math.max(0, Math.floor((countdownTargetMs - nowMs) / 1000));
+    const days = Math.floor(totalSeconds / 86400);
+    const hours = Math.floor((totalSeconds % 86400) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    return { days, hours, minutes, seconds, totalSeconds };
+  }, [countdownTargetMs, nowMs]);
+
   const calculations = useMemo(() => {
     const contrarian: ContrarianZone[] = [];
     let nearestBucket: { name: string; start: number } | null = null;
@@ -148,9 +180,33 @@ export function StatsModule({ stats, tweetProjection, buckets = [] }: StatsModul
             </div>
           )}
 
-          <div className="flex justify-between mt-4 pt-4 border-t border-bg/20 text-[10px] font-mono uppercase tracking-wider">
-            <span className="text-bg/60">{tweetProjection.hoursElapsed.toFixed(0)}h elapsed</span>
-            <span className="text-bg/60">{tweetProjection.hoursRemaining.toFixed(0)}h remaining</span>
+          <div className="mt-4 pt-4 border-t border-bg/20 text-[10px] font-mono uppercase tracking-wider">
+            <div className="flex items-center justify-between text-bg/60">
+              <span>Time left</span>
+              {countdown && countdown.totalSeconds === 0 && <span>Ended</span>}
+            </div>
+            {countdown ? (
+              <div className="grid grid-cols-4 gap-2 mt-2">
+                <div className="text-center">
+                  <div className="text-lg sm:text-xl font-bold tabular-nums text-bg">{countdown.days}</div>
+                  <div className="text-[9px] text-bg/60">days</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-lg sm:text-xl font-bold tabular-nums text-bg">{countdown.hours}</div>
+                  <div className="text-[9px] text-bg/60">hrs</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-lg sm:text-xl font-bold tabular-nums text-bg">{countdown.minutes}</div>
+                  <div className="text-[9px] text-bg/60">min</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-lg sm:text-xl font-bold tabular-nums text-bg">{countdown.seconds}</div>
+                  <div className="text-[9px] text-bg/60">sec</div>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-2 text-bg/40">Time left unavailable</div>
+            )}
           </div>
         </div>
       )}

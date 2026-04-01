@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { searchMarkets, TrackingStats } from '../services/polymarket';
 import { PolymarketEvent } from '../types';
 import { Loader2, DollarSign, TrendingUp, Users, Activity } from 'lucide-react';
+import { parseApiDateMs } from '../utils/datetime';
 
 interface MarketSelectorProps {
   onSelect: (market: PolymarketEvent) => void;
@@ -51,6 +52,26 @@ export function MarketSelector({ onSelect, activeCounts, onRefresh }: MarketSele
     return `$${value.toFixed(0)}`;
   };
 
+  const formatDateTime = (value?: string): string => {
+    const parsed = parseApiDateMs(value);
+    if (parsed === null) return 'TBD';
+    return new Date(parsed).toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  const visibleMarketsCount = React.useMemo(() => {
+    const nowMs = Date.now();
+    return markets.filter((market) => {
+      const stat = market.trackingId ? countsMap[market.trackingId] : undefined;
+      const endMs = parseApiDateMs(stat?.endDate) ?? parseApiDateMs(market.endDate);
+      return endMs === null || endMs > nowMs;
+    }).length;
+  }, [markets, countsMap]);
+
   if (loading && markets.length === 0) {
     return (
       <div
@@ -66,34 +87,56 @@ export function MarketSelector({ onSelect, activeCounts, onRefresh }: MarketSele
 
   return (
     <div className="space-y-6" aria-busy={loading}>
-      <div className="flex justify-between items-center">
-        <h2 className="font-mono text-xs uppercase tracking-[0.2em] opacity-50">Active Events</h2>
+      <div className="flex flex-col gap-4 border border-ink/10 bg-ink/[0.02] px-4 py-4 md:flex-row md:items-end md:justify-between md:px-5">
+        <div className="space-y-2">
+          <h2 className="font-mono text-xs uppercase tracking-[0.2em] opacity-50">Active Events</h2>
+          <p className="max-w-2xl text-sm text-ink/60">
+            Ranked by time window so the next decision is easier to spot at a glance.
+          </p>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="text-right">
+            <div className="font-mono text-[10px] uppercase tracking-[0.22em] opacity-40">Visible</div>
+            <div className="text-2xl font-semibold tabular-nums">{visibleMarketsCount}</div>
+          </div>
         <button
           onClick={() => {
             loadMarkets();
             onRefresh();
           }}
           disabled={loading}
-          className="font-mono text-[10px] uppercase tracking-widest hover:underline disabled:opacity-40 flex items-center gap-2"
+          className="flex items-center gap-2 border border-ink/15 px-3 py-2 font-mono text-[10px] uppercase tracking-widest transition-colors hover:bg-ink hover:text-bg disabled:opacity-40"
         >
           {loading && <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />}
           Refresh Data
         </button>
+        </div>
       </div>
 
       {(() => {
+        const nowMs = Date.now();
+        const getResolvedEndMs = (m: PolymarketEvent) => {
+          const stat = m.trackingId ? countsMap[m.trackingId] : undefined;
+          return parseApiDateMs(stat?.endDate) ?? parseApiDateMs(m.endDate);
+        };
+        const visibleMarkets = markets.filter(m => {
+          const endMs = getResolvedEndMs(m);
+          return endMs === null || endMs > nowMs;
+        });
         const getStartMs = (m: PolymarketEvent) => {
           const stat = m.trackingId ? countsMap[m.trackingId] : undefined;
-          return stat?.startDate ? new Date(stat.startDate).getTime() : new Date(m.endDate || 0).getTime();
+          return parseApiDateMs(stat?.startDate) ?? parseApiDateMs(m.endDate) ?? 0;
         };
         const getDurationDays = (m: PolymarketEvent) => {
           const stat = m.trackingId ? countsMap[m.trackingId] : undefined;
-          if (stat?.startDate && stat?.endDate) {
-            return (new Date(stat.endDate).getTime() - new Date(stat.startDate).getTime()) / 86400000;
+          const startMs = parseApiDateMs(stat?.startDate);
+          const endMs = parseApiDateMs(stat?.endDate);
+          if (startMs !== null && endMs !== null) {
+            return (endMs - startMs) / 86400000;
           }
           return 7; // default to weekly if unknown
         };
-        const sorted = [...markets].sort((a, b) => getStartMs(a) - getStartMs(b));
+        const sorted = [...visibleMarkets].sort((a, b) => getStartMs(a) - getStartMs(b));
         const weekly = sorted.filter(m => getDurationDays(m) >= 5);
         const shortTerm = sorted.filter(m => getDurationDays(m) < 5);
         const renderCard = (market: PolymarketEvent) => (
@@ -103,18 +146,19 @@ export function MarketSelector({ onSelect, activeCounts, onRefresh }: MarketSele
             tabIndex={0}
             onClick={() => onSelect(market)}
             onKeyDown={(e) => handleKeyDown(e, market)}
-            className="border border-ink/10 p-6 hover:bg-ink hover:text-bg cursor-pointer transition-all group relative overflow-hidden focus:outline-none focus:ring-2 focus:ring-ink focus:ring-offset-2"
+            className="group relative overflow-hidden border border-ink/10 bg-bg p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-ink/30 hover:bg-ink hover:text-bg focus:outline-none focus:ring-2 focus:ring-ink focus:ring-offset-2 cursor-pointer md:p-6"
             aria-label={`${market.title}. Volume: ${formatCurrency(market.volume)}. Liquidity: ${formatCurrency(market.liquidity)}. Press Enter to analyze.`}
           >
             <div className="relative z-10">
-              <div className="flex justify-between items-start mb-4">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-[10px] bg-ink/5 group-hover:bg-bg/10 px-2 py-1 rounded-sm uppercase tracking-wider">
+              <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-sm bg-ink/5 px-2 py-1 font-mono text-[10px] uppercase tracking-wider group-hover:bg-bg/10">
                     {market.trackingId ? 'Live Tracking' : 'Standard'}
                   </span>
                   {market.trackingId && countsMap[market.trackingId] !== undefined && (() => {
                     const stat = countsMap[market.trackingId];
-                    const started = !stat.startDate || new Date(stat.startDate) <= new Date();
+                    const startMs = parseApiDateMs(stat.startDate);
+                    const started = startMs === null || startMs <= nowMs;
                     return started ? (
                       <span
                         className="font-mono text-[10px] text-ink group-hover:text-bg font-bold"
@@ -125,40 +169,42 @@ export function MarketSelector({ onSelect, activeCounts, onRefresh }: MarketSele
                     ) : null;
                   })()}
                 </div>
-                <span className="font-mono text-[10px] opacity-50 uppercase tracking-widest">
-                  Ends: {market.endDate ? new Date(market.endDate).toLocaleDateString() : 'TBD'}
-                </span>
+                <div className="space-y-1 text-left md:text-right">
+                  <div className="font-mono text-[9px] uppercase tracking-[0.2em] opacity-35">Event closes</div>
+                  <span className="font-mono text-[11px] uppercase tracking-[0.14em] opacity-65">
+                    {formatDateTime(market.endDate)}
+                  </span>
+                </div>
               </div>
 
-              <h3 className="font-serif italic text-xl md:text-2xl leading-tight mb-4 group-hover:translate-x-2 transition-transform duration-300">
+              <h3 className="mb-5 max-w-4xl font-serif text-2xl italic leading-tight transition-transform duration-300 group-hover:translate-x-2 md:text-3xl">
                 {market.title}
               </h3>
 
-              {/* Market Counters */}
-              <div className="grid grid-cols-4 gap-2 mb-4 py-3 border-y border-ink/10 group-hover:border-bg/20">
-                <div className="text-center">
-                  <div className="flex items-center justify-center gap-1 mb-1">
+              <div className="mb-5 grid grid-cols-2 gap-2 border-y border-ink/10 py-4 group-hover:border-bg/20 md:grid-cols-4">
+                <div className="border border-ink/8 bg-ink/[0.02] px-3 py-3 text-center group-hover:border-bg/15 group-hover:bg-bg/8">
+                  <div className="mb-1 flex items-center justify-center gap-1">
                     <DollarSign className="w-3 h-3 opacity-40" aria-hidden="true" />
                     <span className="font-mono text-[8px] uppercase opacity-40">Volume</span>
                   </div>
                   <span className="font-mono text-xs font-medium">{formatCurrency(market.volume)}</span>
                 </div>
-                <div className="text-center">
-                  <div className="flex items-center justify-center gap-1 mb-1">
+                <div className="border border-ink/8 bg-ink/[0.02] px-3 py-3 text-center group-hover:border-bg/15 group-hover:bg-bg/8">
+                  <div className="mb-1 flex items-center justify-center gap-1">
                     <Activity className="w-3 h-3 opacity-40" aria-hidden="true" />
                     <span className="font-mono text-[8px] uppercase opacity-40">Liquidity</span>
                   </div>
                   <span className="font-mono text-xs font-medium">{formatCurrency(market.liquidity)}</span>
                 </div>
-                <div className="text-center">
-                  <div className="flex items-center justify-center gap-1 mb-1">
+                <div className="border border-ink/8 bg-ink/[0.02] px-3 py-3 text-center group-hover:border-bg/15 group-hover:bg-bg/8">
+                  <div className="mb-1 flex items-center justify-center gap-1">
                     <TrendingUp className="w-3 h-3 opacity-40" aria-hidden="true" />
                     <span className="font-mono text-[8px] uppercase opacity-40">Open Int.</span>
                   </div>
                   <span className="font-mono text-xs font-medium">{formatCurrency(market.openInterest)}</span>
                 </div>
-                <div className="text-center">
-                  <div className="flex items-center justify-center gap-1 mb-1">
+                <div className="border border-ink/8 bg-ink/[0.02] px-3 py-3 text-center group-hover:border-bg/15 group-hover:bg-bg/8">
+                  <div className="mb-1 flex items-center justify-center gap-1">
                     <Users className="w-3 h-3 opacity-40" aria-hidden="true" />
                     <span className="font-mono text-[8px] uppercase opacity-40">24h Vol</span>
                   </div>
@@ -166,29 +212,27 @@ export function MarketSelector({ onSelect, activeCounts, onRefresh }: MarketSele
                 </div>
               </div>
 
-              <div className="flex justify-between items-center pt-2">
+              <div className="flex items-end justify-between gap-4 pt-1">
                 <div className="flex gap-4">
                   <div className="space-y-1">
                     <span className="block font-mono text-[8px] uppercase opacity-40">Status</span>
                     {(() => {
                       const stat = market.trackingId ? countsMap[market.trackingId] : undefined;
-                      const started = !stat?.startDate || new Date(stat.startDate) <= new Date();
+                      const startMs = parseApiDateMs(stat?.startDate);
+                      const started = startMs === null || startMs <= nowMs;
                       if (!started) return (
                         <span className="block font-mono text-[10px] uppercase font-medium flex items-center gap-1.5">
                           <span className="relative flex h-2 w-2">
                             <span className="relative inline-flex rounded-full h-2 w-2 bg-ink/40 group-hover:bg-bg/40"></span>
                           </span>
                           <span className="opacity-50">
-                            Starting {new Date(stat!.startDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            Starting {formatDateTime(stat!.startDate)}
                           </span>
                         </span>
                       );
-                      const hoursElapsed = stat?.startDate ? (Date.now() - new Date(stat.startDate).getTime()) / 3600000 : 99;
-                      // Use xtracker endDate (precise) if available, else fall back to Gamma endDate + 16h offset
-                      const endMs = stat?.endDate
-                        ? new Date(stat.endDate).getTime()
-                        : market.endDate ? new Date(market.endDate).getTime() + 16 * 3600000 : null;
-                      const hoursUntilEnd = endMs ? (endMs - Date.now()) / 3600000 : 999;
+                      const hoursElapsed = startMs !== null ? (nowMs - startMs) / 3600000 : 99;
+                      const endMs = parseApiDateMs(stat?.endDate) ?? parseApiDateMs(market.endDate);
+                      const hoursUntilEnd = endMs !== null ? (endMs - nowMs) / 3600000 : 999;
                       // Warmup only if: early in the tracking period AND not ending within 8h
                       const warming = market.trackingId && hoursUntilEnd > 8 && (!stat || stat.total < 20 || hoursElapsed < 4);
                       return warming ? (
@@ -211,7 +255,7 @@ export function MarketSelector({ onSelect, activeCounts, onRefresh }: MarketSele
                     })()}
                   </div>
                 </div>
-                <span className="font-mono text-[10px] opacity-0 group-hover:opacity-100 transition-opacity">
+                <span className="font-mono text-[10px] uppercase tracking-[0.16em] opacity-0 transition-opacity group-hover:opacity-100">
                   ANALYZE STRATEGY →
                 </span>
               </div>
@@ -225,16 +269,22 @@ export function MarketSelector({ onSelect, activeCounts, onRefresh }: MarketSele
           <div className="space-y-10">
             {weekly.length > 0 && (
               <div className="space-y-4">
-                <h3 className="font-mono text-[10px] uppercase tracking-[0.2em] opacity-40">Weekly Events</h3>
-                <div className="grid grid-cols-1 gap-6">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="font-mono text-[10px] uppercase tracking-[0.2em] opacity-40">Weekly Events</h3>
+                  <span className="font-mono text-[10px] uppercase tracking-[0.18em] opacity-30">Broader window</span>
+                </div>
+                <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
                   {weekly.map(m => <React.Fragment key={m.id}>{renderCard(m)}</React.Fragment>)}
                 </div>
               </div>
             )}
             {shortTerm.length > 0 && (
               <div className="space-y-4">
-                <h3 className="font-mono text-[10px] uppercase tracking-[0.2em] opacity-40">Short-Term Events</h3>
-                <div className="grid grid-cols-1 gap-6">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="font-mono text-[10px] uppercase tracking-[0.2em] opacity-40">Short-Term Events</h3>
+                  <span className="font-mono text-[10px] uppercase tracking-[0.18em] opacity-30">Nearer decision</span>
+                </div>
+                <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
                   {shortTerm.map(m => <React.Fragment key={m.id}>{renderCard(m)}</React.Fragment>)}
                 </div>
               </div>
@@ -243,7 +293,7 @@ export function MarketSelector({ onSelect, activeCounts, onRefresh }: MarketSele
         );
       })()}
 
-      {markets.length === 0 && !loading && (
+      {visibleMarketsCount === 0 && !loading && (
         <div className="text-center py-20 border border-dashed border-ink/20" role="status">
           <p className="font-serif italic text-lg opacity-40">No active events found at the moment.</p>
         </div>
