@@ -282,7 +282,7 @@ export default function App() {
                   Polymarket bucket workspace
                 </span>
                 <span className="font-mono text-[10px] uppercase tracking-[0.24em] opacity-40">
-                  Elon tweet markets only
+                  Elon tweet markets only v1.4
                 </span>
               </div>
                 <div className="space-y-2.5">
