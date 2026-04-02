@@ -9,6 +9,14 @@ import { ArrowLeft, Info, TrendingUp, Sun, Moon, Copy, RotateCw } from 'lucide-r
 import { StatsModule } from './components/StatsModule';
 import { StrategyTabs } from './components/StrategyTabs';
 
+const isSameMarket = (
+  left: Pick<PolymarketEvent, 'id' | 'slug'> | null,
+  right: Pick<PolymarketEvent, 'id' | 'slug'> | null,
+) => {
+  if (!left || !right) return false;
+  return left.id === right.id || (Boolean(left.slug) && left.slug === right.slug);
+};
+
 export default function App() {
   const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
   const AUTO_REFRESH_RETRY_DELAY_MS = 10 * 1000;
@@ -88,6 +96,8 @@ export default function App() {
 
   const loadReplayHistory = React.useCallback(async (market: Pick<PolymarketEvent, 'id' | 'slug'> | null) => {
     const requestId = ++replayHistoryRequestIdRef.current;
+    const isActiveRequest = () => replayHistoryRequestIdRef.current === requestId;
+    const isStillSelectedMarket = () => isSameMarket(selectedMarketRef.current, market);
 
     if (!market) {
       setHeroReplayHistory(null);
@@ -96,20 +106,22 @@ export default function App() {
       return;
     }
 
+    if (!isStillSelectedMarket()) return;
+
     setIsHeroReplayHistoryLoading(true);
     setHeroReplayHistoryError(null);
 
     try {
       const history = await getHeroReplayHistory(market);
-      if (replayHistoryRequestIdRef.current !== requestId) return;
+      if (!isActiveRequest() || !isStillSelectedMarket()) return;
       setHeroReplayHistory(history);
     } catch (error) {
-      if (replayHistoryRequestIdRef.current !== requestId) return;
+      if (!isActiveRequest() || !isStillSelectedMarket()) return;
       console.error('Replay history load failed:', error);
       setHeroReplayHistory(null);
       setHeroReplayHistoryError('Replay history unavailable right now.');
     } finally {
-      if (replayHistoryRequestIdRef.current === requestId) {
+      if (isActiveRequest() && isStillSelectedMarket()) {
         setIsHeroReplayHistoryLoading(false);
       }
     }
@@ -129,6 +141,8 @@ export default function App() {
       if (refreshed) {
         marketForDetail = refreshed;
         void captureHeroReplaySnapshot(refreshed).finally(() => {
+          if (!isCurrentRequest()) return;
+          if (!isSameMarket(selectedMarketRef.current, refreshed)) return;
           void loadReplayHistory(refreshed);
         });
         if (isCurrentRequest()) {
