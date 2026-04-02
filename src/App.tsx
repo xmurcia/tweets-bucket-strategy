@@ -640,6 +640,8 @@ export default function App() {
                           stats={currentStats ?? { id: tweetProjection!.trackingId, total: tweetProjection!.currentCount, daysElapsed: tweetProjection!.hoursElapsed / 24, startDate: tweetProjection!.periodStart, endDate: tweetProjection!.periodEnd }}
                           tweetProjection={tweetProjection}
                           buckets={buckets}
+                          replaySeries={heroReplayHistory?.series ?? null}
+                          isReplayEligible={heroReplayHistory?.availability.isReplayEligible ?? false}
                         />
                       </div>
 

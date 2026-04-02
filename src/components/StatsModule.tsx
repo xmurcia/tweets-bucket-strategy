@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { TrackingStats } from '../services/polymarket';
-import { TweetProjection, Bucket } from '../types';
+import { TweetProjection, Bucket, HeroReplayNormalizedSeries } from '../types';
 import { parseApiDateMs } from '../utils/datetime';
 import { HeroCurveChart } from './HeroCurveChart';
 
@@ -8,6 +8,8 @@ interface StatsModuleProps {
   stats: TrackingStats;
   tweetProjection?: TweetProjection | null;
   buckets?: Bucket[];
+  replaySeries?: HeroReplayNormalizedSeries | null;
+  isReplayEligible?: boolean;
 }
 
 interface ContrarianZone {
@@ -18,7 +20,13 @@ interface ContrarianZone {
   ev: number; // expected value per $1 staked
 }
 
-export function StatsModule({ stats, tweetProjection, buckets = [] }: StatsModuleProps) {
+export function StatsModule({
+  stats,
+  tweetProjection,
+  buckets = [],
+  replaySeries = null,
+  isReplayEligible = false,
+}: StatsModuleProps) {
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   const countdownTargetMs = useMemo(() => {
@@ -182,7 +190,7 @@ export function StatsModule({ stats, tweetProjection, buckets = [] }: StatsModul
           )}
 
           <div className="mt-5">
-            <HeroCurveChart buckets={buckets} />
+            <HeroCurveChart buckets={buckets} replaySeries={replaySeries} isReplayEligible={isReplayEligible} />
           </div>
 
           <div className="mt-4 pt-4 border-t border-bg/20 text-[10px] font-mono uppercase tracking-wider">

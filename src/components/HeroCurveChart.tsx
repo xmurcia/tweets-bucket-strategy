@@ -1,10 +1,13 @@
 import { useMemo } from 'react';
 import { CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import type { Bucket, HeroReplayChartPoint, HeroReplayBucketMidpoint } from '../types';
+import type { Bucket, HeroReplayChartPoint, HeroReplayBucketMidpoint, HeroReplayNormalizedSeries } from '../types';
 import { parseHeroReplayBucketMidpoint } from '../utils/heroReplay';
+import { useHeroReplayPlayback } from '../hooks/useHeroReplayPlayback';
 
 interface HeroCurveChartProps {
   buckets: Bucket[];
+  replaySeries?: HeroReplayNormalizedSeries | null;
+  isReplayEligible?: boolean;
 }
 
 type LiveHeroCurvePoint = HeroReplayChartPoint;
@@ -39,12 +42,30 @@ function buildLiveHeroCurvePoints(buckets: Bucket[]): LiveHeroCurvePoint[] {
   return points;
 }
 
-export function HeroCurveChart({ buckets }: HeroCurveChartProps) {
-  const points = useMemo(() => buildLiveHeroCurvePoints(buckets), [buckets]);
+export function HeroCurveChart({
+  buckets,
+  replaySeries = null,
+  isReplayEligible = false,
+}: HeroCurveChartProps) {
+  const livePoints = useMemo(() => buildLiveHeroCurvePoints(buckets), [buckets]);
+  const { frame, playbackState, progress } = useHeroReplayPlayback({
+    series: replaySeries,
+    livePoints,
+    enabled: isReplayEligible,
+    autoPlay: true,
+  });
+
+  const points = frame?.points?.length ? frame.points : livePoints;
 
   if (points.length < 2) {
     return null;
   }
+
+  const playbackLabel = playbackState === 'playing'
+    ? `Replay ${Math.round(progress * 100)}%`
+    : playbackState === 'complete'
+      ? 'Live'
+      : 'Live';
 
   return (
     <div className="border border-bg/20 bg-bg/5 p-4 md:p-5">
@@ -56,7 +77,7 @@ export function HeroCurveChart({ buckets }: HeroCurveChartProps) {
           </p>
         </div>
         <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-bg/40">
-          {points.length} live buckets
+          {playbackLabel} · {points.length} buckets
         </div>
       </div>
 
