@@ -12,12 +12,12 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Solo copiamos lo necesario desde el stage anterior
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/tsconfig.json ./
 COPY --from=builder /app/*.ts ./
+COPY --from=builder /app/src ./src
 
 ENV NODE_ENV=production
 
