@@ -3,6 +3,9 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
 
+import { captureHeroReplaySnapshot, getHeroReplayHistoryPath } from "./heroReplayStore.ts";
+import type { PolymarketEvent } from "./src/types.ts";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -301,6 +304,8 @@ async function startServer() {
   const XTRACKER_API_URL = 'https://xtracker.polymarket.com/api';
   const GAMMA_API_URL = 'https://gamma-api.polymarket.com';
 
+  app.use(express.json());
+
   // Proxy for Polymarket API to avoid CORS issues
   app.get("/api/polymarket/events", async (req, res) => {
     try {
@@ -420,6 +425,32 @@ async function startServer() {
     } catch (error) {
       console.error('Proxy error:', error);
       res.status(500).json({ error: 'Failed to fetch events' });
+    }
+  });
+
+  app.post("/api/polymarket/hero-replay/capture", async (req, res) => {
+    try {
+      const { event } = req.body ?? {};
+
+      if (!event || typeof event !== 'object') {
+        return res.status(400).json({ error: 'event payload required' });
+      }
+
+      const candidateEvent = event as Partial<PolymarketEvent>;
+      if (!candidateEvent.id || !candidateEvent.title || !candidateEvent.endDate || !Array.isArray(candidateEvent.markets)) {
+        return res.status(400).json({ error: 'invalid event payload' });
+      }
+
+      const capture = await captureHeroReplaySnapshot(candidateEvent as PolymarketEvent);
+
+      res.json({
+        captured: capture.didAppend,
+        snapshot: capture.snapshot,
+        historyPath: getHeroReplayHistoryPath(capture.snapshot),
+      });
+    } catch (error) {
+      console.error('Hero replay capture error:', error);
+      res.status(500).json({ error: 'Failed to capture hero replay snapshot' });
     }
   });
 
