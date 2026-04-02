@@ -1,0 +1,112 @@
+import { useMemo } from 'react';
+import { CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import type { Bucket, HeroReplayChartPoint, HeroReplayBucketMidpoint } from '../types';
+import { parseHeroReplayBucketMidpoint } from '../utils/heroReplay';
+
+interface HeroCurveChartProps {
+  buckets: Bucket[];
+}
+
+type LiveHeroCurvePoint = HeroReplayChartPoint;
+
+function buildLiveHeroCurvePoints(buckets: Bucket[]): LiveHeroCurvePoint[] {
+  const points: LiveHeroCurvePoint[] = [];
+  let previousMidpoint: HeroReplayBucketMidpoint | null = null;
+
+  for (const bucket of buckets) {
+    if (!Number.isFinite(bucket.price) || bucket.price < 0) {
+      continue;
+    }
+
+    const midpoint = parseHeroReplayBucketMidpoint(bucket.name, previousMidpoint);
+    if (!midpoint) {
+      continue;
+    }
+
+    points.push({
+      bucketId: bucket.id,
+      bucketName: bucket.name,
+      tokenId: bucket.tokenId,
+      x: midpoint.midpoint,
+      y: bucket.price,
+      midpoint,
+      usedFallbackPrice: false,
+    });
+
+    previousMidpoint = midpoint;
+  }
+
+  return points;
+}
+
+export function HeroCurveChart({ buckets }: HeroCurveChartProps) {
+  const points = useMemo(() => buildLiveHeroCurvePoints(buckets), [buckets]);
+
+  if (points.length < 2) {
+    return null;
+  }
+
+  return (
+    <div className="border border-bg/20 bg-bg/5 p-4 md:p-5">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-bg/55">Live curve</div>
+          <p className="mt-1 text-sm leading-5 text-bg/72">
+            Smoothed line for shape, real bucket dots for the current market state.
+          </p>
+        </div>
+        <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-bg/40">
+          {points.length} live buckets
+        </div>
+      </div>
+
+      <div className="mt-4 h-56 w-full md:h-64">
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={points} margin={{ top: 8, right: 8, bottom: 8, left: 0 }}>
+            <CartesianGrid stroke="rgba(228, 227, 224, 0.12)" vertical={false} />
+            <XAxis
+              dataKey="x"
+              type="number"
+              ticks={points.map((point) => point.x)}
+              tickFormatter={(value) => points.find((point) => point.x === value)?.bucketName ?? ''}
+              tick={{ fill: 'rgba(228, 227, 224, 0.55)', fontSize: 10, fontFamily: 'ui-monospace, SFMono-Regular, monospace' }}
+              tickLine={false}
+              axisLine={false}
+              interval="preserveStartEnd"
+              minTickGap={20}
+            />
+            <YAxis
+              domain={[0, 1]}
+              tickFormatter={(value) => `${Math.round(value * 100)}%`}
+              tick={{ fill: 'rgba(228, 227, 224, 0.55)', fontSize: 10, fontFamily: 'ui-monospace, SFMono-Regular, monospace' }}
+              tickLine={false}
+              axisLine={false}
+              width={38}
+            />
+            <Tooltip
+              cursor={{ stroke: 'rgba(228, 227, 224, 0.18)', strokeWidth: 1 }}
+              contentStyle={{
+                backgroundColor: '#141414',
+                border: '1px solid rgba(228, 227, 224, 0.2)',
+                borderRadius: '0px',
+                color: '#E4E3E0',
+                fontSize: '12px',
+              }}
+              formatter={(value: number) => [`${(value * 100).toFixed(1)}%`, 'Ask']}
+              labelFormatter={(_, payload) => payload?.[0]?.payload?.bucketName ?? ''}
+            />
+            <Line
+              type="monotone"
+              dataKey="y"
+              stroke="#E4E3E0"
+              strokeWidth={2}
+              dot={{ r: 4, fill: '#141414', stroke: '#E4E3E0', strokeWidth: 2 }}
+              activeDot={{ r: 5, fill: '#141414', stroke: '#E4E3E0', strokeWidth: 2 }}
+              isAnimationActive={false}
+            />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
