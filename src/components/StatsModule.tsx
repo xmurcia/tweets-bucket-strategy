@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { TrackingStats } from '../services/polymarket';
 import { TweetProjection, Bucket } from '../types';
 import { parseApiDateMs } from '../utils/datetime';
+import { HeroCurveChart } from './HeroCurveChart';
 
 interface StatsModuleProps {
   stats: TrackingStats;
@@ -179,6 +180,10 @@ export function StatsModule({ stats, tweetProjection, buckets = [] }: StatsModul
               </div>
             </div>
           )}
+
+          <div className="mt-5">
+            <HeroCurveChart buckets={buckets} />
+          </div>
 
           <div className="mt-4 pt-4 border-t border-bg/20 text-[10px] font-mono uppercase tracking-wider">
             <div className="flex items-center justify-between text-bg/60">
