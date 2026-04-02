@@ -1,4 +1,4 @@
-import type { TrackingStats } from '../types';
+import type { HeroReplayHistoryPayload, TrackingStats } from '../types';
 import { PolymarketEvent, Bucket, TweetProjection, ProjectionInsufficient } from '../types';
 import { isDateInPast } from '../utils/datetime';
 
@@ -45,6 +45,20 @@ export async function captureHeroReplaySnapshot(event: PolymarketEvent): Promise
   } catch (error) {
     console.error('Error capturing hero replay snapshot:', error);
   }
+}
+
+export async function getHeroReplayHistory(event: Pick<PolymarketEvent, 'id' | 'slug'>): Promise<HeroReplayHistoryPayload> {
+  const params = new URLSearchParams({ eventId: event.id });
+  if (event.slug) {
+    params.set('slug', event.slug);
+  }
+
+  const response = await fetch(`/api/polymarket/hero-replay/history?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error('Failed to fetch hero replay history');
+  }
+
+  return await response.json() as HeroReplayHistoryPayload;
 }
 
 function parseNumericField(value: unknown): number | undefined {

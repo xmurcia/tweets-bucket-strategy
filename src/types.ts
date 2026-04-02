@@ -179,7 +179,7 @@ export interface HeroReplayStatus {
 
 export interface HeroReplayHistoryPayload {
   availability: HeroReplayAvailabilityState;
-  snapshots: HeroReplayStoredSnapshot[];
+  series: HeroReplayNormalizedSeries;
 }
 
 export interface HeroReplayFramesPayload {

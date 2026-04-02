@@ -3,8 +3,16 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
 
-import { captureHeroReplaySnapshot } from "./heroReplayStore.ts";
-import type { PolymarketEvent } from "./src/types.ts";
+import { captureHeroReplaySnapshot, readHeroReplaySnapshots } from "./heroReplayStore.ts";
+import { normalizeHeroReplaySnapshots } from "./src/utils/heroReplay.ts";
+import {
+  HERO_REPLAY_MIN_HISTORY_DAYS,
+  HERO_REPLAY_MIN_HISTORY_MS,
+  type HeroReplayAvailabilityState,
+  type HeroReplayHistoryPayload,
+  type HeroReplayNormalizedSeries,
+  type PolymarketEvent,
+} from "./src/types.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -28,6 +36,29 @@ const RANGE_SIZE = 20;
 const MAX_RANGE_START = 2000;
 const MIN_HOURS_FOR_PROJECTION = 4;
 const MIN_TWEETS_FOR_PROJECTION = 20;
+
+function buildHeroReplayAvailability(series: HeroReplayNormalizedSeries): HeroReplayAvailabilityState {
+  const snapshotCount = series.snapshots.length;
+  const historySpanMs = series.historySpanMs;
+  const status = snapshotCount === 0
+    ? 'no-history'
+    : historySpanMs >= HERO_REPLAY_MIN_HISTORY_MS
+      ? 'ready'
+      : 'insufficient-history';
+
+  return {
+    status,
+    isReplayEligible: status === 'ready',
+    minimumHistoryDays: HERO_REPLAY_MIN_HISTORY_DAYS,
+    minimumHistoryMs: HERO_REPLAY_MIN_HISTORY_MS,
+    snapshotCount,
+    historyStartAt: series.historyStartAt,
+    historyEndAt: series.historyEndAt,
+    historySpanMs,
+    latestSnapshotAt: series.historyEndAt,
+    hasLiveSnapshot: snapshotCount > 0,
+  };
+}
 
 type HourlySlot = {
   date: string;
@@ -450,6 +481,31 @@ async function startServer() {
     } catch (error) {
       console.error('Hero replay capture error:', error);
       res.status(500).json({ error: 'Failed to capture hero replay snapshot' });
+    }
+  });
+
+  app.get("/api/polymarket/hero-replay/history", async (req, res) => {
+    try {
+      const { eventId, slug } = req.query;
+
+      if (!eventId || typeof eventId !== 'string') {
+        return res.status(400).json({ error: 'eventId query param required' });
+      }
+
+      const snapshots = await readHeroReplaySnapshots({
+        eventId,
+        eventSlug: typeof slug === 'string' ? slug : undefined,
+      });
+      const series = normalizeHeroReplaySnapshots(snapshots);
+      const payload: HeroReplayHistoryPayload = {
+        availability: buildHeroReplayAvailability(series),
+        series,
+      };
+
+      res.json(payload);
+    } catch (error) {
+      console.error('Hero replay history error:', error);
+      res.status(500).json({ error: 'Failed to load hero replay history' });
     }
   });
 
