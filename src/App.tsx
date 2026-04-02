@@ -2,12 +2,20 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { MarketSelector } from './components/MarketSelector';
 import { BucketList } from './components/BucketList';
 import { BetCalculator } from './components/BetCalculator';
-import { PolymarketEvent, TweetProjection, ProjectionInsufficient } from './types';
-import { searchMarkets, parseBuckets, getTrackingStats, getActiveCounts, getTweetProjection, getTweetProjectionByDate, captureHeroReplaySnapshot, TrackingStats } from './services/polymarket';
+import { HERO_REPLAY_MIN_HISTORY_DAYS, PolymarketEvent, TweetProjection, ProjectionInsufficient, type HeroReplayHistoryPayload } from './types';
+import { searchMarkets, parseBuckets, getTrackingStats, getActiveCounts, getTweetProjection, getTweetProjectionByDate, captureHeroReplaySnapshot, getHeroReplayHistory, TrackingStats } from './services/polymarket';
 import { motion, AnimatePresence } from 'motion/react';
 import { ArrowLeft, Info, TrendingUp, Sun, Moon, Copy, RotateCw } from 'lucide-react';
 import { StatsModule } from './components/StatsModule';
 import { StrategyTabs } from './components/StrategyTabs';
+
+const isSameMarket = (
+  left: Pick<PolymarketEvent, 'id' | 'slug'> | null,
+  right: Pick<PolymarketEvent, 'id' | 'slug'> | null,
+) => {
+  if (!left || !right) return false;
+  return left.id === right.id || (Boolean(left.slug) && left.slug === right.slug);
+};
 
 export default function App() {
   const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
@@ -21,6 +29,9 @@ export default function App() {
   const [activeCounts, setActiveCounts] = useState<TrackingStats[]>([]);
   const [tweetProjection, setTweetProjection] = useState<TweetProjection | null>(null);
   const [projectionInsufficient, setProjectionInsufficient] = useState<ProjectionInsufficient | null>(null);
+  const [heroReplayHistory, setHeroReplayHistory] = useState<HeroReplayHistoryPayload | null>(null);
+  const [heroReplayHistoryError, setHeroReplayHistoryError] = useState<string | null>(null);
+  const [isHeroReplayHistoryLoading, setIsHeroReplayHistoryLoading] = useState(false);
   const [dark, setDark] = useState(false);
   const [copied, setCopied] = useState(false);
   const [nowMs, setNowMs] = useState(Date.now());
@@ -30,6 +41,7 @@ export default function App() {
   const autoRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedMarketRef = useRef<PolymarketEvent | null>(null);
   const refreshRequestIdRef = useRef(0);
+  const replayHistoryRequestIdRef = useRef(0);
   const refreshInFlightRef = useRef(false);
 
   const TIPS_ADDRESS = '0x137789060E41030417b7835B6647EFe9b712F6F3';
@@ -82,6 +94,39 @@ export default function App() {
     return () => window.clearInterval(ticker);
   }, []);
 
+  const loadReplayHistory = React.useCallback(async (market: Pick<PolymarketEvent, 'id' | 'slug'> | null) => {
+    const requestId = ++replayHistoryRequestIdRef.current;
+    const isActiveRequest = () => replayHistoryRequestIdRef.current === requestId;
+    const isStillSelectedMarket = () => isSameMarket(selectedMarketRef.current, market);
+
+    if (!market) {
+      setHeroReplayHistory(null);
+      setHeroReplayHistoryError(null);
+      setIsHeroReplayHistoryLoading(false);
+      return;
+    }
+
+    if (!isStillSelectedMarket()) return;
+
+    setIsHeroReplayHistoryLoading(true);
+    setHeroReplayHistoryError(null);
+
+    try {
+      const history = await getHeroReplayHistory(market);
+      if (!isActiveRequest() || !isStillSelectedMarket()) return;
+      setHeroReplayHistory(history);
+    } catch (error) {
+      if (!isActiveRequest() || !isStillSelectedMarket()) return;
+      console.error('Replay history load failed:', error);
+      setHeroReplayHistory(null);
+      setHeroReplayHistoryError('Replay history unavailable right now.');
+    } finally {
+      if (isActiveRequest() && isStillSelectedMarket()) {
+        setIsHeroReplayHistoryLoading(false);
+      }
+    }
+  }, []);
+
   const refreshMarketData = React.useCallback(async (market: PolymarketEvent, refreshEventData = true) => {
     const requestId = ++refreshRequestIdRef.current;
     const isCurrentRequest = () => refreshRequestIdRef.current === requestId;
@@ -95,7 +140,11 @@ export default function App() {
       const refreshed = markets.find(m => m.id === market.id || (market.slug && m.slug === market.slug));
       if (refreshed) {
         marketForDetail = refreshed;
-        void captureHeroReplaySnapshot(refreshed);
+        void captureHeroReplaySnapshot(refreshed).finally(() => {
+          if (!isCurrentRequest()) return;
+          if (!isSameMarket(selectedMarketRef.current, refreshed)) return;
+          void loadReplayHistory(refreshed);
+        });
         if (isCurrentRequest()) {
           setSelectedMarket(prev => (prev && prev.id === refreshed.id ? refreshed : prev));
         }
@@ -137,11 +186,23 @@ export default function App() {
       setTweetProjection(result as TweetProjection | null);
       setProjectionInsufficient(null);
     }
-  }, []);
+  }, [loadReplayHistory]);
 
   useEffect(() => {
     selectedMarketRef.current = selectedMarket;
   }, [selectedMarket]);
+
+  useEffect(() => {
+    if (!selectedMarket) {
+      replayHistoryRequestIdRef.current += 1;
+      setHeroReplayHistory(null);
+      setHeroReplayHistoryError(null);
+      setIsHeroReplayHistoryLoading(false);
+      return;
+    }
+
+    void loadReplayHistory(selectedMarket);
+  }, [loadReplayHistory, selectedMarket]);
 
   const clearAutoRefresh = React.useCallback(() => {
     if (autoRefreshRef.current !== null) {
@@ -236,6 +297,8 @@ export default function App() {
     setSelectedBucketIds(new Set());
     setTweetProjection(null);
     setProjectionInsufficient(null);
+    setHeroReplayHistory(null);
+    setHeroReplayHistoryError(null);
 
     await refreshMarketData(market, false);
   };
@@ -271,6 +334,50 @@ export default function App() {
           };
 
   const startedStats = currentStats || tweetProjection || projectionInsufficient;
+  const replayAvailability = heroReplayHistory?.availability ?? null;
+  const replayHistorySpanDays = replayAvailability ? replayAvailability.historySpanMs / (24 * 60 * 60 * 1000) : 0;
+  const replayHistoryRemainingDays = replayAvailability
+    ? Math.max(0, replayAvailability.minimumHistoryDays - replayHistorySpanDays)
+    : HERO_REPLAY_MIN_HISTORY_DAYS;
+  const replayStatus = (() => {
+    if (heroReplayHistoryError) {
+      return {
+        label: 'History unavailable',
+        tone: 'border-negative/30 bg-negative/10 text-negative',
+        detail: heroReplayHistoryError,
+      };
+    }
+
+    if (isHeroReplayHistoryLoading) {
+      return {
+        label: 'Checking history',
+        tone: 'border-ink/15 bg-bg text-ink/70',
+        detail: 'Replay availability is loading independently from live market refresh.',
+      };
+    }
+
+    if (!replayAvailability || replayAvailability.status === 'no-history') {
+      return {
+        label: 'No history',
+        tone: 'border-ink/15 bg-bg text-ink/70',
+        detail: 'Replay is locked until this event has stored snapshots.',
+      };
+    }
+
+    if (replayAvailability.status === 'insufficient-history') {
+      return {
+        label: 'Insufficient history',
+        tone: 'border-warning/30 bg-warning/10 text-warning',
+        detail: `${replayHistorySpanDays.toFixed(1)} of ${replayAvailability.minimumHistoryDays} full days captured. ${replayHistoryRemainingDays.toFixed(1)} more needed.`,
+      };
+    }
+
+    return {
+      label: 'History ready',
+      tone: 'border-positive/30 bg-positive/10 text-positive',
+      detail: `${replayAvailability.snapshotCount} snapshots across ${replayHistorySpanDays.toFixed(1)} days. Replay is eligible.`,
+    };
+  })();
 
   return (
     <div className="min-h-screen bg-bg">
@@ -564,6 +671,45 @@ export default function App() {
                             </div>
                           </div>
                         )}
+
+                        <div className="space-y-4 border border-ink/10 p-5">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <h4 className="font-mono text-[10px] uppercase tracking-[0.22em] opacity-55">Replay history</h4>
+                              <p className="mt-2 text-sm leading-6 text-ink/62">
+                                Replay availability is derived from stored event history and unlocks only after {HERO_REPLAY_MIN_HISTORY_DAYS} full days.
+                              </p>
+                            </div>
+                            <div className={`inline-flex items-center gap-2 border px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.2em] ${replayStatus.tone}`}>
+                              <span>{replayStatus.label}</span>
+                            </div>
+                          </div>
+
+                          <div className={`border px-4 py-3 text-sm ${replayStatus.tone}`}>
+                            {replayStatus.detail}
+                          </div>
+
+                          <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+                            <div className="border border-ink/10 bg-ink/[0.03] px-4 py-4">
+                              <div className="font-mono text-[10px] uppercase tracking-[0.2em] opacity-45">Snapshots</div>
+                              <div className="mt-2 text-lg font-medium">
+                                {isHeroReplayHistoryLoading ? '...' : (replayAvailability?.snapshotCount ?? 0).toLocaleString()}
+                              </div>
+                            </div>
+                            <div className="border border-ink/10 bg-ink/[0.03] px-4 py-4">
+                              <div className="font-mono text-[10px] uppercase tracking-[0.2em] opacity-45">History window</div>
+                              <div className="mt-2 text-lg font-medium">
+                                {isHeroReplayHistoryLoading ? '...' : `${replayHistorySpanDays.toFixed(1)}d`}
+                              </div>
+                            </div>
+                            <div className="border border-ink/10 bg-ink/[0.03] px-4 py-4">
+                              <div className="font-mono text-[10px] uppercase tracking-[0.2em] opacity-45">Replay gate</div>
+                              <div className="mt-2 text-lg font-medium">
+                                {replayAvailability?.isReplayEligible ? 'Enabled' : 'Locked'}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
 
                         <div className="space-y-4 border border-ink/10 p-5">
                           <div>
