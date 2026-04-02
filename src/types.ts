@@ -177,6 +177,12 @@ export interface HeroReplayStatus {
   shouldStopPlayback: boolean;
 }
 
+export interface HeroReplayPlaybackConfig {
+  minDurationMs: number;
+  maxDurationMs: number;
+  targetDurationMs: number;
+}
+
 export interface HeroReplayHistoryPayload {
   availability: HeroReplayAvailabilityState;
   series: HeroReplayNormalizedSeries;
