@@ -3,7 +3,7 @@ import { MarketSelector } from './components/MarketSelector';
 import { BucketList } from './components/BucketList';
 import { BetCalculator } from './components/BetCalculator';
 import { PolymarketEvent, TweetProjection, ProjectionInsufficient } from './types';
-import { searchMarkets, parseBuckets, getTrackingStats, getActiveCounts, getTweetProjection, getTweetProjectionByDate, TrackingStats } from './services/polymarket';
+import { searchMarkets, parseBuckets, getTrackingStats, getActiveCounts, getTweetProjection, getTweetProjectionByDate, captureHeroReplaySnapshot, TrackingStats } from './services/polymarket';
 import { motion, AnimatePresence } from 'motion/react';
 import { ArrowLeft, Info, TrendingUp, Sun, Moon, Copy, RotateCw } from 'lucide-react';
 import { StatsModule } from './components/StatsModule';
@@ -95,6 +95,7 @@ export default function App() {
       const refreshed = markets.find(m => m.id === market.id || (market.slug && m.slug === market.slug));
       if (refreshed) {
         marketForDetail = refreshed;
+        void captureHeroReplaySnapshot(refreshed);
         if (isCurrentRequest()) {
           setSelectedMarket(prev => (prev && prev.id === refreshed.id ? refreshed : prev));
         }

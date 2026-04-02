@@ -61,6 +61,133 @@ export interface TrackingStats {
   title?: string;
 }
 
+export const HERO_REPLAY_MIN_HISTORY_DAYS = 4;
+export const HERO_REPLAY_MIN_HISTORY_MS = HERO_REPLAY_MIN_HISTORY_DAYS * 24 * 60 * 60 * 1000;
+
+export type HeroReplayAvailability = 'no-history' | 'insufficient-history' | 'ready';
+export type HeroReplayFrameKind = 'snapshot' | 'interpolated' | 'live';
+export type HeroReplayPlaybackState = 'idle' | 'loading' | 'playing' | 'paused' | 'complete' | 'unavailable';
+
+export interface HeroReplaySnapshotIdentity {
+  eventId: string;
+  eventSlug?: string;
+  eventTitle: string;
+  eventEndDate: string;
+  trackingId?: string;
+}
+
+export interface HeroReplayStoredSnapshot extends HeroReplaySnapshotIdentity {
+  capturedAt: string;
+  capturedAtMs: number;
+  // Store the raw event payload so replay reuses parseBuckets() pricing.
+  event: PolymarketEvent;
+}
+
+export interface HeroReplayBucketRange {
+  label: string;
+  rangeStart: number;
+  rangeEnd: number | null;
+  width: number | null;
+  isOpenEnded: boolean;
+}
+
+export interface HeroReplayBucketMidpoint extends HeroReplayBucketRange {
+  midpoint: number;
+  usedWidthHeuristic: boolean;
+}
+
+export interface HeroReplayNormalizedBucket extends Bucket {
+  midpoint: HeroReplayBucketMidpoint;
+  sourceCapturedAt: string;
+  sourceCapturedAtMs: number;
+  sourceSnapshotIndex: number;
+  usedFallbackPrice: boolean;
+}
+
+export interface HeroReplayChartPoint {
+  bucketId: string;
+  bucketName: string;
+  tokenId: string;
+  x: number;
+  y: number;
+  midpoint: HeroReplayBucketMidpoint;
+  usedFallbackPrice: boolean;
+}
+
+export interface HeroReplayNormalizedSnapshot extends HeroReplaySnapshotIdentity {
+  capturedAt: string;
+  capturedAtMs: number;
+  sourceSnapshotIndex: number;
+  buckets: HeroReplayNormalizedBucket[];
+  points: HeroReplayChartPoint[];
+}
+
+export interface HeroReplayNormalizedSeriesBucket {
+  bucketId: string;
+  bucketName: string;
+  tokenId: string;
+  x: number;
+  midpoint: HeroReplayBucketMidpoint;
+}
+
+export interface HeroReplayNormalizedSeries {
+  buckets: HeroReplayNormalizedSeriesBucket[];
+  snapshots: HeroReplayNormalizedSnapshot[];
+  historyStartAt: string | null;
+  historyEndAt: string | null;
+  historySpanMs: number;
+}
+
+export interface HeroReplayFrame {
+  kind: HeroReplayFrameKind;
+  frameAt: string;
+  frameAtMs: number;
+  startedAt: string;
+  startedAtMs: number;
+  endedAt: string;
+  endedAtMs: number;
+  interpolationProgress: number;
+  sourceSnapshotIndex: number;
+  nextSnapshotIndex: number | null;
+  isLive: boolean;
+  buckets: HeroReplayNormalizedBucket[];
+  points: HeroReplayChartPoint[];
+}
+
+export interface HeroReplayAvailabilityState {
+  status: HeroReplayAvailability;
+  isReplayEligible: boolean;
+  minimumHistoryDays: number;
+  minimumHistoryMs: number;
+  snapshotCount: number;
+  historyStartAt: string | null;
+  historyEndAt: string | null;
+  historySpanMs: number;
+  latestSnapshotAt: string | null;
+  hasLiveSnapshot: boolean;
+}
+
+export interface HeroReplayStatus {
+  availability: HeroReplayAvailabilityState;
+  playbackState: HeroReplayPlaybackState;
+  currentFrameIndex: number;
+  currentFrameKind: HeroReplayFrameKind | null;
+  currentFrameAt: string | null;
+  isAtLiveFrame: boolean;
+  shouldStopPlayback: boolean;
+}
+
+export interface HeroReplayHistoryPayload {
+  availability: HeroReplayAvailabilityState;
+  snapshots: HeroReplayStoredSnapshot[];
+}
+
+export interface HeroReplayFramesPayload {
+  availability: HeroReplayAvailabilityState;
+  frames: HeroReplayFrame[];
+  liveFrame: HeroReplayFrame | null;
+}
+
 export interface Bucket {
   id: string;
   name: string;

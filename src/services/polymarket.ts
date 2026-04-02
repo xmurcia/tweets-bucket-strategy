@@ -1,5 +1,8 @@
+import type { TrackingStats } from '../types';
 import { PolymarketEvent, Bucket, TweetProjection, ProjectionInsufficient } from '../types';
 import { isDateInPast } from '../utils/datetime';
+
+export type { TrackingStats } from '../types';
 
 export async function searchMarkets(query: string): Promise<PolymarketEvent[]> {
   try {
@@ -26,13 +29,22 @@ export async function searchMarkets(query: string): Promise<PolymarketEvent[]> {
   }
 }
 
-export interface TrackingStats {
-  id: string;
-  total: number;
-  daysElapsed: number;
-  startDate: string;
-  endDate: string;
-  title?: string;
+export async function captureHeroReplaySnapshot(event: PolymarketEvent): Promise<void> {
+  try {
+    const response = await fetch('/api/polymarket/hero-replay/capture', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ event }),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to capture hero replay snapshot');
+    }
+  } catch (error) {
+    console.error('Error capturing hero replay snapshot:', error);
+  }
 }
 
 function parseNumericField(value: unknown): number | undefined {
