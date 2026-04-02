@@ -3,7 +3,7 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
 
-import { captureHeroReplaySnapshot, getHeroReplayHistoryPath } from "./heroReplayStore.ts";
+import { captureHeroReplaySnapshot } from "./heroReplayStore.ts";
 import type { PolymarketEvent } from "./src/types.ts";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -446,7 +446,6 @@ async function startServer() {
       res.json({
         captured: capture.didAppend,
         snapshot: capture.snapshot,
-        historyPath: getHeroReplayHistoryPath(capture.snapshot),
       });
     } catch (error) {
       console.error('Hero replay capture error:', error);

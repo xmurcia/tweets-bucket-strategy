@@ -27,7 +27,7 @@ function compareSnapshots(a: HeroReplayStoredSnapshot, b: HeroReplayStoredSnapsh
 }
 
 function isValidReplayPrice(price: number): boolean {
-  return Number.isFinite(price) && price > 0;
+  return Number.isFinite(price) && price >= 0;
 }
 
 export function parseHeroReplayBucketMidpoint(
