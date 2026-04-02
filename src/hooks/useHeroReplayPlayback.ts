@@ -189,6 +189,34 @@ function interpolatePoints(
   return points;
 }
 
+function buildLivePoints(
+  bucketOrder: string[],
+  liveWaypoint: HeroReplayWaypoint,
+): HeroReplayChartPoint[] {
+  const points: HeroReplayChartPoint[] = [];
+  const seenBuckets = new Set<string>();
+
+  for (const bucketName of bucketOrder) {
+    const point = liveWaypoint.pointsByBucket.get(bucketName);
+    if (!point) {
+      continue;
+    }
+
+    points.push({ ...point });
+    seenBuckets.add(bucketName);
+  }
+
+  const extraLivePoints = [...liveWaypoint.pointsByBucket.values()]
+    .filter((point) => !seenBuckets.has(point.bucketName))
+    .sort((left, right) => left.bucketName.localeCompare(right.bucketName));
+
+  for (const point of extraLivePoints) {
+    points.push({ ...point });
+  }
+
+  return points;
+}
+
 function buildFrame(
   timeline: HeroReplayTimeline,
   segment: HeroReplayPlaybackSegment,
@@ -198,7 +226,9 @@ function buildFrame(
 ): HeroReplayFrame {
   const clampedLocalProgress = clamp(localProgress, 0, 1);
   const frameAtMs = Math.round(segment.start.atMs + ((segment.end.atMs - segment.start.atMs) * clampedLocalProgress));
-  const points = interpolatePoints(timeline.bucketOrder, segment.start, segment.end, clampedLocalProgress);
+  const points = isComplete
+    ? buildLivePoints(timeline.bucketOrder, segment.end)
+    : interpolatePoints(timeline.bucketOrder, segment.start, segment.end, clampedLocalProgress);
   const buckets = points.map((point) => ({
     id: point.bucketId,
     name: point.bucketName,
