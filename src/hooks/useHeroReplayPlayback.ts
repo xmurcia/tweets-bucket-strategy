@@ -493,6 +493,7 @@ export function useHeroReplayPlayback({
       startedAtPerfMsRef.current = null;
       elapsedMsRef.current = 0;
       activeRunRef.current = null;
+      playbackStateRef.current = 'idle';
       return;
     }
 
