@@ -17,6 +17,11 @@ const isSameMarket = (
   return left.id === right.id || (Boolean(left.slug) && left.slug === right.slug);
 };
 
+const buildReplayCoordinationKey = (market: Pick<PolymarketEvent, 'id' | 'slug'> | null): string | null => {
+  if (!market) return null;
+  return `${market.id}::${market.slug ?? ''}`;
+};
+
 export default function App() {
   const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
   const AUTO_REFRESH_RETRY_DELAY_MS = 10 * 1000;
@@ -32,6 +37,9 @@ export default function App() {
   const [heroReplayHistory, setHeroReplayHistory] = useState<HeroReplayHistoryPayload | null>(null);
   const [heroReplayHistoryError, setHeroReplayHistoryError] = useState<string | null>(null);
   const [isHeroReplayHistoryLoading, setIsHeroReplayHistoryLoading] = useState(false);
+  const [heroReplayCoordinationKey, setHeroReplayCoordinationKey] = useState<string | null>(null);
+  const [heroReplayHistoryVersion, setHeroReplayHistoryVersion] = useState(0);
+  const [heroReplayLiveVersion, setHeroReplayLiveVersion] = useState(0);
   const [dark, setDark] = useState(false);
   const [copied, setCopied] = useState(false);
   const [nowMs, setNowMs] = useState(Date.now());
@@ -103,6 +111,7 @@ export default function App() {
       setHeroReplayHistory(null);
       setHeroReplayHistoryError(null);
       setIsHeroReplayHistoryLoading(false);
+      setHeroReplayHistoryVersion(0);
       return;
     }
 
@@ -115,11 +124,13 @@ export default function App() {
       const history = await getHeroReplayHistory(market);
       if (!isActiveRequest() || !isStillSelectedMarket()) return;
       setHeroReplayHistory(history);
+      setHeroReplayHistoryVersion(version => version + 1);
     } catch (error) {
       if (!isActiveRequest() || !isStillSelectedMarket()) return;
       console.error('Replay history load failed:', error);
       setHeroReplayHistory(null);
       setHeroReplayHistoryError('Replay history unavailable right now.');
+      setHeroReplayHistoryVersion(version => version + 1);
     } finally {
       if (isActiveRequest() && isStillSelectedMarket()) {
         setIsHeroReplayHistoryLoading(false);
@@ -147,6 +158,7 @@ export default function App() {
         });
         if (isCurrentRequest()) {
           setSelectedMarket(prev => (prev && prev.id === refreshed.id ? refreshed : prev));
+          setHeroReplayLiveVersion(version => version + 1);
         }
         const availableBucketIds = new Set(parseBuckets(refreshed).map(b => b.id));
         if (isCurrentRequest()) {
@@ -198,6 +210,9 @@ export default function App() {
       setHeroReplayHistory(null);
       setHeroReplayHistoryError(null);
       setIsHeroReplayHistoryLoading(false);
+      setHeroReplayCoordinationKey(null);
+      setHeroReplayHistoryVersion(0);
+      setHeroReplayLiveVersion(0);
       return;
     }
 
@@ -294,6 +309,9 @@ export default function App() {
 
   const handleMarketSelect = async (market: PolymarketEvent) => {
     setSelectedMarket(market);
+    setHeroReplayCoordinationKey(buildReplayCoordinationKey(market));
+    setHeroReplayHistoryVersion(0);
+    setHeroReplayLiveVersion(0);
     setSelectedBucketIds(new Set());
     setTweetProjection(null);
     setProjectionInsufficient(null);
@@ -642,6 +660,9 @@ export default function App() {
                           buckets={buckets}
                           replaySeries={heroReplayHistory?.series ?? null}
                           isReplayEligible={heroReplayHistory?.availability.isReplayEligible ?? false}
+                          replayCoordinationKey={heroReplayCoordinationKey}
+                          replayHistoryVersion={heroReplayHistoryVersion}
+                          replayLiveVersion={heroReplayLiveVersion}
                         />
                       </div>
 

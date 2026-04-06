@@ -10,6 +10,9 @@ interface StatsModuleProps {
   buckets?: Bucket[];
   replaySeries?: HeroReplayNormalizedSeries | null;
   isReplayEligible?: boolean;
+  replayCoordinationKey?: string | null;
+  replayHistoryVersion?: number;
+  replayLiveVersion?: number;
 }
 
 interface ContrarianZone {
@@ -26,6 +29,9 @@ export function StatsModule({
   buckets = [],
   replaySeries = null,
   isReplayEligible = false,
+  replayCoordinationKey = null,
+  replayHistoryVersion = 0,
+  replayLiveVersion = 0,
 }: StatsModuleProps) {
   const [nowMs, setNowMs] = useState(() => Date.now());
 
@@ -190,7 +196,14 @@ export function StatsModule({
           )}
 
           <div className="mt-5">
-            <HeroCurveChart buckets={buckets} replaySeries={replaySeries} isReplayEligible={isReplayEligible} />
+            <HeroCurveChart
+              buckets={buckets}
+              replaySeries={replaySeries}
+              isReplayEligible={isReplayEligible}
+              replayCoordinationKey={replayCoordinationKey}
+              replayHistoryVersion={replayHistoryVersion}
+              replayLiveVersion={replayLiveVersion}
+            />
           </div>
 
           <div className="mt-4 pt-4 border-t border-bg/20 text-[10px] font-mono uppercase tracking-wider">
