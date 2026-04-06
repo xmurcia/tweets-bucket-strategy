@@ -8,6 +8,9 @@ interface HeroCurveChartProps {
   buckets: Bucket[];
   replaySeries?: HeroReplayNormalizedSeries | null;
   isReplayEligible?: boolean;
+  replayCoordinationKey?: string | null;
+  replayHistoryVersion?: number;
+  replayLiveVersion?: number;
 }
 
 type LiveHeroCurvePoint = HeroReplayChartPoint;
@@ -46,6 +49,9 @@ export function HeroCurveChart({
   buckets,
   replaySeries = null,
   isReplayEligible = false,
+  replayCoordinationKey = null,
+  replayHistoryVersion = 0,
+  replayLiveVersion = 0,
 }: HeroCurveChartProps) {
   const livePoints = useMemo(() => buildLiveHeroCurvePoints(buckets), [buckets]);
   const {
@@ -61,6 +67,9 @@ export function HeroCurveChart({
     livePoints,
     enabled: isReplayEligible,
     autoPlay: true,
+    coordinationKey: replayCoordinationKey,
+    replayHistoryVersion,
+    liveStateVersion: replayLiveVersion,
   });
 
   const points = frame?.points?.length ? frame.points : livePoints;

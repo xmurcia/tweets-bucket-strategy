@@ -36,6 +36,9 @@ interface UseHeroReplayPlaybackInput {
   livePoints: HeroReplayChartPoint[];
   enabled: boolean;
   autoPlay?: boolean;
+  coordinationKey?: string | null;
+  replayHistoryVersion?: number;
+  liveStateVersion?: number;
   config?: Partial<HeroReplayPlaybackConfig>;
 }
 
@@ -296,6 +299,9 @@ export function useHeroReplayPlayback({
   livePoints,
   enabled,
   autoPlay = true,
+  coordinationKey = null,
+  replayHistoryVersion = 0,
+  liveStateVersion = 0,
   config,
 }: UseHeroReplayPlaybackInput): UseHeroReplayPlaybackResult {
   const mergedConfig = useMemo<HeroReplayPlaybackConfig>(() => ({
@@ -315,31 +321,50 @@ export function useHeroReplayPlayback({
   const rafRef = useRef<number | null>(null);
   const startedAtPerfMsRef = useRef<number | null>(null);
   const elapsedMsRef = useRef(0);
+  const runTokenRef = useRef(0);
+  const playbackStateRef = useRef<HeroReplayPlaybackState>('idle');
+  const latestTimelineRef = useRef<HeroReplayTimeline | null>(timeline);
+  const latestEnabledRef = useRef(enabled);
+  const latestCoordinationKeyRef = useRef<string | null>(coordinationKey);
+  const activeRunRef = useRef<{
+    timeline: HeroReplayTimeline;
+    coordinationKey: string | null;
+    startedAtPerfMs: number;
+  } | null>(null);
   const isUnavailable = !enabled || !timeline;
 
+  useEffect(() => {
+    playbackStateRef.current = playbackState;
+  }, [playbackState]);
+
+  useEffect(() => {
+    latestTimelineRef.current = timeline;
+    latestEnabledRef.current = enabled;
+    latestCoordinationKeyRef.current = coordinationKey;
+  }, [timeline, enabled, coordinationKey]);
+
   const cancelPlayback = useCallback(() => {
+    runTokenRef.current += 1;
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
   }, []);
 
-  const resetToLive = useCallback(() => {
-    cancelPlayback();
-    if (!timeline) {
-      startedAtPerfMsRef.current = null;
-      elapsedMsRef.current = 0;
+  const settleToLatestLive = useCallback((fallbackTimeline: HeroReplayTimeline | null = null) => {
+    const latestTimeline = latestTimelineRef.current ?? fallbackTimeline;
+    if (!latestTimeline) {
       setFrame(null);
-      setPlaybackState(enabled ? 'idle' : 'unavailable');
+      setPlaybackState(latestEnabledRef.current ? 'idle' : 'unavailable');
       setProgress(0);
       return;
     }
 
-    const finalSegment = timeline.segments.at(-1)!;
+    const finalSegment = latestTimeline.segments.at(-1)!;
     const liveFrame = buildFrame(
-      timeline,
+      latestTimeline,
       finalSegment,
-      timeline.totalDurationMs,
+      latestTimeline.totalDurationMs,
       1,
       true,
     );
@@ -347,14 +372,21 @@ export function useHeroReplayPlayback({
     setFrame(liveFrame);
     setProgress(1);
     startedAtPerfMsRef.current = null;
-    elapsedMsRef.current = timeline.totalDurationMs;
+    elapsedMsRef.current = latestTimeline.totalDurationMs;
     setPlaybackState('complete');
-  }, [cancelPlayback, enabled, timeline]);
+  }, []);
+
+  const resetToLive = useCallback(() => {
+    cancelPlayback();
+    activeRunRef.current = null;
+    settleToLatestLive();
+  }, [cancelPlayback, settleToLatestLive]);
 
   const runPlaybackFromElapsed = useCallback((initialElapsedMs: number) => {
     cancelPlayback();
 
-    if (!enabled || !timeline) {
+    const runTimeline = latestTimelineRef.current;
+    if (!latestEnabledRef.current || !runTimeline) {
       startedAtPerfMsRef.current = null;
       elapsedMsRef.current = 0;
       setPlaybackState('unavailable');
@@ -362,31 +394,53 @@ export function useHeroReplayPlayback({
       return;
     }
 
-    const safeInitialElapsedMs = clamp(initialElapsedMs, 0, timeline.totalDurationMs);
+    const safeInitialElapsedMs = clamp(initialElapsedMs, 0, runTimeline.totalDurationMs);
     elapsedMsRef.current = safeInitialElapsedMs;
-    startedAtPerfMsRef.current = performance.now() - safeInitialElapsedMs;
+    const startedAtPerfMs = performance.now() - safeInitialElapsedMs;
+    startedAtPerfMsRef.current = startedAtPerfMs;
+
+    const runToken = runTokenRef.current;
+    activeRunRef.current = {
+      timeline: runTimeline,
+      coordinationKey: latestCoordinationKeyRef.current,
+      startedAtPerfMs,
+    };
+
     setPlaybackState('playing');
 
     const tick = (nowPerfMs: number) => {
-      const startedAtPerfMs = startedAtPerfMsRef.current;
-      if (startedAtPerfMs === null) {
+      if (runToken !== runTokenRef.current) {
         return;
       }
 
-      const elapsedMs = nowPerfMs - startedAtPerfMs;
-      const clampedElapsedMs = clamp(elapsedMs, 0, timeline.totalDurationMs);
+      const activeRun = activeRunRef.current;
+      if (!activeRun) {
+        return;
+      }
+
+      if (activeRun.coordinationKey !== latestCoordinationKeyRef.current) {
+        setFrame(null);
+        setProgress(0);
+        setPlaybackState(latestEnabledRef.current && latestTimelineRef.current ? 'idle' : 'unavailable');
+        activeRunRef.current = null;
+        rafRef.current = null;
+        return;
+      }
+
+      const elapsedMs = nowPerfMs - activeRun.startedAtPerfMs;
+      const clampedElapsedMs = clamp(elapsedMs, 0, activeRun.timeline.totalDurationMs);
       elapsedMsRef.current = clampedElapsedMs;
 
-      const isComplete = clampedElapsedMs >= timeline.totalDurationMs;
-      const { segment, localElapsedMs } = locateSegment(timeline, clampedElapsedMs);
+      const isComplete = clampedElapsedMs >= activeRun.timeline.totalDurationMs;
+      const { segment, localElapsedMs } = locateSegment(activeRun.timeline, clampedElapsedMs);
       const localProgress = segment.durationMs <= 0 ? 1 : clamp(localElapsedMs / segment.durationMs, 0, 1);
 
-      setFrame(buildFrame(timeline, segment, clampedElapsedMs, localProgress, isComplete));
-      setProgress(clamp(clampedElapsedMs / timeline.totalDurationMs, 0, 1));
+      setFrame(buildFrame(activeRun.timeline, segment, clampedElapsedMs, localProgress, isComplete));
+      setProgress(clamp(clampedElapsedMs / activeRun.timeline.totalDurationMs, 0, 1));
 
       if (isComplete) {
         startedAtPerfMsRef.current = null;
-        elapsedMsRef.current = timeline.totalDurationMs;
+        activeRunRef.current = null;
         setPlaybackState('complete');
         rafRef.current = null;
         return;
@@ -396,7 +450,7 @@ export function useHeroReplayPlayback({
     };
 
     rafRef.current = requestAnimationFrame(tick);
-  }, [cancelPlayback, enabled, timeline]);
+  }, [cancelPlayback]);
 
   const startPlayback = useCallback(() => {
     setProgress(0);
@@ -438,6 +492,12 @@ export function useHeroReplayPlayback({
       cancelPlayback();
       startedAtPerfMsRef.current = null;
       elapsedMsRef.current = 0;
+      activeRunRef.current = null;
+      playbackStateRef.current = 'idle';
+      return;
+    }
+
+    if (playbackStateRef.current === 'playing') {
       return;
     }
 
@@ -459,7 +519,16 @@ export function useHeroReplayPlayback({
       cancelPlayback();
       startedAtPerfMsRef.current = null;
     };
-  }, [autoPlay, cancelPlayback, isUnavailable, resetToLive, startPlayback]);
+  }, [
+    autoPlay,
+    cancelPlayback,
+    coordinationKey,
+    isUnavailable,
+    liveStateVersion,
+    replayHistoryVersion,
+    resetToLive,
+    startPlayback,
+  ]);
 
   useEffect(() => () => cancelPlayback(), [cancelPlayback]);
 
