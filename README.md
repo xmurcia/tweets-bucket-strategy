@@ -54,6 +54,14 @@ Use `.env.local` (not `.env`).
 - `GET /api/polymarket/tweet-projection/:trackingId`
 - `GET /api/polymarket/tweet-projection-by-date?endDate=...&slug=...`
 
+## Hero Replay Feature
+
+The Hero Replay feature allows users to replay market history from stored snapshots. Key notes:
+
+- **History requirement**: Replay requires at least 4 days of historical snapshots.
+- **Temporary storage**: Replay history is stored as temporary JSON files (not permanent storage). These files are created on-demand in a temp directory and should not be relied upon for long-term data persistence.
+- **Playback duration**: Full replay defaults to 6-8 seconds regardless of history span.
+
 ## Projection and calibration notes (short events)
 
 Current projection behavior is tuned to avoid overconfident outputs early in an event:
