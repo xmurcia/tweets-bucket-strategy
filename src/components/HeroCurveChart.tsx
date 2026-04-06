@@ -48,7 +48,15 @@ export function HeroCurveChart({
   isReplayEligible = false,
 }: HeroCurveChartProps) {
   const livePoints = useMemo(() => buildLiveHeroCurvePoints(buckets), [buckets]);
-  const { frame, playbackState, progress } = useHeroReplayPlayback({
+  const {
+    frame,
+    playbackState,
+    progress,
+    startPlayback,
+    pausePlayback,
+    replayPlayback,
+    resumePlayback,
+  } = useHeroReplayPlayback({
     series: replaySeries,
     livePoints,
     enabled: isReplayEligible,
@@ -63,9 +71,27 @@ export function HeroCurveChart({
 
   const playbackLabel = playbackState === 'playing'
     ? `Replay ${Math.round(progress * 100)}%`
+    : playbackState === 'paused'
+      ? `Paused ${Math.round(progress * 100)}%`
     : playbackState === 'complete'
       ? 'Live'
       : 'Live';
+
+  const replayUnavailable = playbackState === 'unavailable';
+  const primaryActionLabel = playbackState === 'playing' ? 'Pause' : 'Play';
+  const handlePrimaryAction = () => {
+    if (playbackState === 'playing') {
+      pausePlayback();
+      return;
+    }
+
+    if (playbackState === 'paused') {
+      resumePlayback();
+      return;
+    }
+
+    startPlayback();
+  };
 
   return (
     <div className="border border-bg/20 bg-bg/5 p-4 md:p-5">
@@ -79,6 +105,28 @@ export function HeroCurveChart({
         <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-bg/40">
           {playbackLabel} · {points.length} buckets
         </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={handlePrimaryAction}
+          disabled={replayUnavailable}
+          className="inline-flex items-center border border-bg/35 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-bg transition-colors hover:bg-bg hover:text-ink disabled:cursor-not-allowed disabled:border-bg/20 disabled:text-bg/35"
+        >
+          {primaryActionLabel}
+        </button>
+        <button
+          type="button"
+          onClick={replayPlayback}
+          disabled={replayUnavailable}
+          className="inline-flex items-center border border-bg/35 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-bg transition-colors hover:bg-bg hover:text-ink disabled:cursor-not-allowed disabled:border-bg/20 disabled:text-bg/35"
+        >
+          Replay
+        </button>
+        <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-bg/45">
+          {replayUnavailable ? 'Replay locked until history gate is met' : 'Chart controls only'}
+        </span>
       </div>
 
       <div className="mt-4 h-56 w-full md:h-64">
