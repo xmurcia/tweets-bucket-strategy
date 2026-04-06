@@ -44,6 +44,9 @@ interface UseHeroReplayPlaybackResult {
   frame: HeroReplayFrame | null;
   progress: number;
   startPlayback: () => void;
+  pausePlayback: () => void;
+  resumePlayback: () => void;
+  replayPlayback: () => void;
   resetToLive: () => void;
   durationMs: number;
 }
@@ -310,6 +313,8 @@ export function useHeroReplayPlayback({
   const [frame, setFrame] = useState<HeroReplayFrame | null>(null);
   const [progress, setProgress] = useState(0);
   const rafRef = useRef<number | null>(null);
+  const startedAtPerfMsRef = useRef<number | null>(null);
+  const elapsedMsRef = useRef(0);
   const isUnavailable = !enabled || !timeline;
 
   const cancelPlayback = useCallback(() => {
@@ -322,6 +327,8 @@ export function useHeroReplayPlayback({
   const resetToLive = useCallback(() => {
     cancelPlayback();
     if (!timeline) {
+      startedAtPerfMsRef.current = null;
+      elapsedMsRef.current = 0;
       setFrame(null);
       setPlaybackState(enabled ? 'idle' : 'unavailable');
       setProgress(0);
@@ -339,25 +346,37 @@ export function useHeroReplayPlayback({
 
     setFrame(liveFrame);
     setProgress(1);
+    startedAtPerfMsRef.current = null;
+    elapsedMsRef.current = timeline.totalDurationMs;
     setPlaybackState('complete');
   }, [cancelPlayback, enabled, timeline]);
 
-  const startPlayback = useCallback(() => {
+  const runPlaybackFromElapsed = useCallback((initialElapsedMs: number) => {
     cancelPlayback();
 
     if (!enabled || !timeline) {
+      startedAtPerfMsRef.current = null;
+      elapsedMsRef.current = 0;
       setPlaybackState('unavailable');
       setProgress(0);
       return;
     }
 
+    const safeInitialElapsedMs = clamp(initialElapsedMs, 0, timeline.totalDurationMs);
+    elapsedMsRef.current = safeInitialElapsedMs;
+    startedAtPerfMsRef.current = performance.now() - safeInitialElapsedMs;
     setPlaybackState('playing');
-    setProgress(0);
-    const startedAtPerfMs = performance.now();
 
     const tick = (nowPerfMs: number) => {
+      const startedAtPerfMs = startedAtPerfMsRef.current;
+      if (startedAtPerfMs === null) {
+        return;
+      }
+
       const elapsedMs = nowPerfMs - startedAtPerfMs;
       const clampedElapsedMs = clamp(elapsedMs, 0, timeline.totalDurationMs);
+      elapsedMsRef.current = clampedElapsedMs;
+
       const isComplete = clampedElapsedMs >= timeline.totalDurationMs;
       const { segment, localElapsedMs } = locateSegment(timeline, clampedElapsedMs);
       const localProgress = segment.durationMs <= 0 ? 1 : clamp(localElapsedMs / segment.durationMs, 0, 1);
@@ -366,6 +385,8 @@ export function useHeroReplayPlayback({
       setProgress(clamp(clampedElapsedMs / timeline.totalDurationMs, 0, 1));
 
       if (isComplete) {
+        startedAtPerfMsRef.current = null;
+        elapsedMsRef.current = timeline.totalDurationMs;
         setPlaybackState('complete');
         rafRef.current = null;
         return;
@@ -377,9 +398,46 @@ export function useHeroReplayPlayback({
     rafRef.current = requestAnimationFrame(tick);
   }, [cancelPlayback, enabled, timeline]);
 
+  const startPlayback = useCallback(() => {
+    setProgress(0);
+    elapsedMsRef.current = 0;
+    runPlaybackFromElapsed(0);
+  }, [runPlaybackFromElapsed]);
+
+  const pausePlayback = useCallback(() => {
+    if (playbackState !== 'playing') {
+      return;
+    }
+
+    cancelPlayback();
+
+    if (timeline && startedAtPerfMsRef.current !== null) {
+      const elapsedMs = clamp(performance.now() - startedAtPerfMsRef.current, 0, timeline.totalDurationMs);
+      elapsedMsRef.current = elapsedMs;
+      setProgress(clamp(elapsedMs / timeline.totalDurationMs, 0, 1));
+    }
+
+    startedAtPerfMsRef.current = null;
+    setPlaybackState(isUnavailable ? 'unavailable' : 'paused');
+  }, [cancelPlayback, isUnavailable, playbackState, timeline]);
+
+  const resumePlayback = useCallback(() => {
+    if (playbackState === 'playing') {
+      return;
+    }
+
+    runPlaybackFromElapsed(elapsedMsRef.current);
+  }, [playbackState, runPlaybackFromElapsed]);
+
+  const replayPlayback = useCallback(() => {
+    startPlayback();
+  }, [startPlayback]);
+
   useEffect(() => {
     if (isUnavailable) {
       cancelPlayback();
+      startedAtPerfMsRef.current = null;
+      elapsedMsRef.current = 0;
       return;
     }
 
@@ -399,6 +457,7 @@ export function useHeroReplayPlayback({
     return () => {
       cancelAnimationFrame(playbackFrame);
       cancelPlayback();
+      startedAtPerfMsRef.current = null;
     };
   }, [autoPlay, cancelPlayback, isUnavailable, resetToLive, startPlayback]);
 
@@ -409,6 +468,9 @@ export function useHeroReplayPlayback({
     frame: isUnavailable ? null : frame,
     progress: isUnavailable ? 0 : progress,
     startPlayback,
+    pausePlayback,
+    resumePlayback,
+    replayPlayback,
     resetToLive,
     durationMs: timeline?.totalDurationMs ?? 0,
   };
