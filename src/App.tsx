@@ -3,7 +3,7 @@ import { MarketSelector } from './components/MarketSelector';
 import { BucketList } from './components/BucketList';
 import { BetCalculator } from './components/BetCalculator';
 import { HERO_REPLAY_MIN_HISTORY_DAYS, PolymarketEvent, TweetProjection, ProjectionInsufficient, type HeroReplayHistoryPayload } from './types';
-import { searchMarkets, parseBuckets, getTrackingStats, getActiveCounts, getTweetProjection, getTweetProjectionByDate, captureHeroReplaySnapshot, getHeroReplayHistory, TrackingStats } from './services/polymarket';
+import { searchMarkets, parseBuckets, getTrackingStats, getActiveCounts, getTweetProjection, getTweetProjectionByDate, captureHeroReplaySnapshot, getHeroReplayHistory, TrackingStats, parseNumericField } from './services/polymarket';
 import { motion, AnimatePresence } from 'motion/react';
 import { ArrowLeft, Info, TrendingUp, Sun, Moon, Copy, RotateCw } from 'lucide-react';
 import { StatsModule } from './components/StatsModule';
@@ -70,6 +70,15 @@ export default function App() {
 
   const buckets = useMemo(() => {
     return selectedMarket ? parseBuckets(selectedMarket) : [];
+  }, [selectedMarket]);
+
+  const marketSpread = useMemo(() => {
+    if (!selectedMarket?.markets?.[0]) return undefined;
+    const market = selectedMarket.markets[0];
+    const bestAsk = parseNumericField(market.bestAsk);
+    const bestBid = parseNumericField(market.bestBid);
+    if (bestAsk === undefined || bestBid === undefined) return undefined;
+    return (bestAsk - bestBid) * 100;
   }, [selectedMarket]);
 
   const selectedBuckets = useMemo(() => {
@@ -801,6 +810,7 @@ export default function App() {
                         buckets={buckets}
                         selectedIds={selectedBucketIds}
                         onToggle={handleToggleBucket}
+                        spread={marketSpread}
                       />
                     </section>
                   </div>

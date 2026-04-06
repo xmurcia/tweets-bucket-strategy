@@ -61,7 +61,7 @@ export async function getHeroReplayHistory(event: Pick<PolymarketEvent, 'id' | '
   return await response.json() as HeroReplayHistoryPayload;
 }
 
-function parseNumericField(value: unknown): number | undefined {
+export function parseNumericField(value: unknown): number | undefined {
   if (typeof value === 'number') {
     return Number.isFinite(value) ? value : undefined;
   }
