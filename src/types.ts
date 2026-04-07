@@ -199,6 +199,7 @@ export interface Bucket {
   name: string;
   price: number; // Detail view entry price (best ask when available)
   tokenId: string;
+  spread?: number; // Bid-ask spread in percentage points (undefined for categorical outcomes)
 }
 
 export interface RangeProbability {

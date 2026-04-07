@@ -167,7 +167,7 @@ export function StatsModule({
     return {
       bucketName: targetBucket.name,
       priceShare,
-      isLowVolume: priceShare < 0.20,
+      isLowProbability: priceShare < 0.20,
     };
   }, [tweetProjection, buckets]);
 
@@ -280,7 +280,7 @@ export function StatsModule({
       {/* Projection + metrics grid */}
       {tweetProjection && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className={`border p-4 ${projectionBucketWarning?.isLowVolume ? 'border-yellow-500 bg-yellow-500/10' : 'border-ink/10'}`}>
+          <div className={`border p-4 ${projectionBucketWarning?.isLowProbability ? 'border-yellow-500 bg-yellow-500/10' : 'border-ink/10'}`}>
             <span className="font-mono text-[10px] uppercase opacity-50 block mb-1">Projected Total (80% CI)</span>
             <div className="text-2xl font-bold tabular-nums">
               {tweetProjection.projectedRange.low}–{tweetProjection.projectedRange.high}
@@ -290,8 +290,8 @@ export function StatsModule({
             </div>
             {projectionBucketWarning && (
               <div className="text-[10px] font-mono mt-2 text-yellow-700">
-                {projectionBucketWarning.isLowVolume ? (
-                  <>⚠ Low liquidity bucket ({Math.round(projectionBucketWarning.priceShare * 100)}% of market)</>
+                {projectionBucketWarning.isLowProbability ? (
+                  <>⚠ Low probability bucket ({Math.round(projectionBucketWarning.priceShare * 100)}% of outcomes)</>
                 ) : (
                   <span className="text-ink/40">Bucket: {projectionBucketWarning.bucketName}</span>
                 )}

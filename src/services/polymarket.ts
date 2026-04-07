@@ -155,6 +155,11 @@ export function parseBuckets(event: PolymarketEvent): Bucket[] {
       const outcomePrices = JSON.parse(market.outcomePrices);
       const tokenIds = JSON.parse(market.clobTokenIds);
       const marketBestAsk = parseNumericField(market.bestAsk);
+      const marketBestBid = parseNumericField(market.bestBid);
+      const marketSpread =
+        marketBestAsk !== undefined && marketBestBid !== undefined
+          ? (marketBestAsk - marketBestBid) * 100
+          : undefined;
 
       // Caso 1: Mercado binario (Yes/No)
       // Extraemos el rango de la pregunta
@@ -183,6 +188,7 @@ export function parseBuckets(event: PolymarketEvent): Bucket[] {
             ? marketBestAsk
             : parseFloat(outcomePrices[yesIndex] || '0'),
           tokenId: tokenIds[yesIndex],
+          spread: marketSpread,
         });
       } 
       // Caso 2: Mercado categórico (múltiples outcomes en un solo mercado)

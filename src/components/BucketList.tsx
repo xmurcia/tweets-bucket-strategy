@@ -7,10 +7,9 @@ interface BucketListProps {
   buckets: Bucket[];
   selectedIds: Set<string>;
   onToggle: (id: string) => void;
-  spread?: number;
 }
 
-export function BucketList({ buckets, selectedIds, onToggle, spread }: BucketListProps) {
+export function BucketList({ buckets, selectedIds, onToggle }: BucketListProps) {
   const handleKeyDown = useCallback((e: React.KeyboardEvent, bucketId: string) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
@@ -66,7 +65,7 @@ export function BucketList({ buckets, selectedIds, onToggle, spread }: BucketLis
                 </div>
                 <div role="cell" className="text-right font-mono text-sm tabular-nums">${bucket.price.toFixed(3)}</div>
                 <div role="cell" className="text-right font-mono text-sm tabular-nums">{(bucket.price * 100).toFixed(1)}%</div>
-                <div role="cell" className="text-right font-mono text-sm tabular-nums">{spread !== undefined ? `${spread.toFixed(1)}%` : '--'}</div>
+                <div role="cell" className="text-right font-mono text-sm tabular-nums">{bucket.spread !== undefined ? `${bucket.spread.toFixed(1)}%` : '--'}</div>
               </div>
             );
           })}
@@ -117,7 +116,7 @@ export function BucketList({ buckets, selectedIds, onToggle, spread }: BucketLis
                     </div>
                     <div className="text-right">
                       <span className="block text-[10px] uppercase tracking-wide opacity-50">Spread</span>
-                      <span>{spread !== undefined ? `${spread.toFixed(1)}%` : '--'}</span>
+                      <span>{bucket.spread !== undefined ? `${bucket.spread.toFixed(1)}%` : '--'}</span>
                     </div>
                   </div>
                 </div>
