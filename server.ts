@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 
 import { captureHeroReplaySnapshot, readHeroReplaySnapshots } from "./heroReplayStore.ts";
 import { normalizeHeroReplaySnapshots } from "./src/utils/heroReplay.ts";
+import { calculateConfidence, getRateStability } from "./src/utils/confidence.ts";
 import {
   HERO_REPLAY_MIN_HISTORY_DAYS,
   HERO_REPLAY_MIN_HISTORY_MS,
@@ -297,10 +298,18 @@ function buildProjectionMetrics(
     high: Math.max(0, Math.ceil(projectedTotal + std * 1.4)),
   };
 
-  const progress = hoursTotal > 0 ? clampNumber(hoursElapsed / hoursTotal, 0, 1) : 0;
-  const dispersionPenalty = Math.max(0, Math.min(0.12, (dispersion - 1) * 0.08));
-  const confidenceRaw = 0.2 + 0.75 * Math.pow(progress, 1.15) - dispersionPenalty;
-  const confidence = clampNumber(confidenceRaw, 0.15, 0.95);
+  const last12 = dailySlots.slice(-12);
+  const recentPace12h =
+    last12.length > 0 ? last12.reduce((sum, s) => sum + s.count, 0) / last12.length : tweetsPerHour;
+
+  const confidence = calculateConfidence(
+    hoursElapsed,
+    hoursTotal,
+    currentCount,
+    recentPace12h,
+    tweetsPerHour
+  );
+  const rateStability = getRateStability(recentPace12h, tweetsPerHour);
 
   const rangeProbabilities = buildRangeProbabilities(
     currentCount,
@@ -320,6 +329,7 @@ function buildProjectionMetrics(
       projectedTotal,
       projectedRange,
       confidence,
+      rateStability,
       hoursElapsed,
       hoursRemaining,
       periodStart: data.startDate,

@@ -72,6 +72,7 @@ export default function App() {
     return selectedMarket ? parseBuckets(selectedMarket) : [];
   }, [selectedMarket]);
 
+
   const selectedBuckets = useMemo(() => {
     return buckets.filter(b => selectedBucketIds.has(b.id));
   }, [buckets, selectedBucketIds]);

@@ -20,11 +20,12 @@ export function BucketList({ buckets, selectedIds, onToggle }: BucketListProps) 
   return (
     <div className="border-t border-ink/15" aria-label="Outcome buckets">
       <div className="hidden md:block" role="table" aria-label="Outcome buckets desktop table">
-        <div className="grid grid-cols-[48px_minmax(0,1.7fr)_0.8fr_0.8fr] border-b border-ink/10 bg-ink/[0.04] px-4 py-3" role="row">
+        <div className="grid grid-cols-[48px_minmax(0,1.7fr)_0.8fr_0.8fr_0.6fr] border-b border-ink/10 bg-ink/[0.04] px-4 py-3" role="row">
           <div role="columnheader" className="font-mono text-[10px] uppercase tracking-[0.18em] opacity-45">Sel</div>
           <div role="columnheader" className="font-mono text-[10px] uppercase tracking-[0.18em] opacity-45">Outcome Bucket</div>
           <div role="columnheader" className="text-right font-mono text-[10px] uppercase tracking-[0.18em] opacity-45">Ask ($)</div>
           <div role="columnheader" className="text-right font-mono text-[10px] uppercase tracking-[0.18em] opacity-45">Ask Prob (%)</div>
+          <div role="columnheader" className="text-right font-mono text-[10px] uppercase tracking-[0.18em] opacity-45">Spread</div>
         </div>
 
         <div className="space-y-2 pt-2" role="rowgroup">
@@ -39,7 +40,7 @@ export function BucketList({ buckets, selectedIds, onToggle }: BucketListProps) 
                 onClick={() => onToggle(bucket.id)}
                 onKeyDown={(e) => handleKeyDown(e, bucket.id)}
                 className={cn(
-                  "group grid grid-cols-[48px_minmax(0,1.7fr)_0.8fr_0.8fr] cursor-pointer items-center border px-4 py-4 transition-colors focus:outline-none focus:ring-2 focus:ring-ink focus:ring-inset",
+                  "group grid grid-cols-[48px_minmax(0,1.7fr)_0.8fr_0.8fr_0.6fr] cursor-pointer items-center border px-4 py-4 transition-colors focus:outline-none focus:ring-2 focus:ring-ink focus:ring-inset",
                   isSelected ? "border-ink bg-ink text-bg" : "border-ink/10 bg-bg hover:border-ink/25 hover:bg-ink/[0.03]"
                 )}
               >
@@ -64,6 +65,7 @@ export function BucketList({ buckets, selectedIds, onToggle }: BucketListProps) 
                 </div>
                 <div role="cell" className="text-right font-mono text-sm tabular-nums">${bucket.price.toFixed(3)}</div>
                 <div role="cell" className="text-right font-mono text-sm tabular-nums">{(bucket.price * 100).toFixed(1)}%</div>
+                <div role="cell" className="text-right font-mono text-sm tabular-nums">{bucket.spread !== undefined ? `${bucket.spread.toFixed(1)}%` : '--'}</div>
               </div>
             );
           })}
@@ -103,7 +105,7 @@ export function BucketList({ buckets, selectedIds, onToggle }: BucketListProps) 
                   <div className={cn("font-mono text-[10px] uppercase tracking-[0.16em]", isSelected ? "text-bg/55" : "text-ink/40")}>
                     Tap to {isSelected ? 'remove' : 'add'}
                   </div>
-                  <div className="grid grid-cols-2 gap-2 font-mono text-xs">
+                  <div className="grid grid-cols-3 gap-2 font-mono text-xs">
                     <div>
                       <span className="block text-[10px] uppercase tracking-wide opacity-50">Ask</span>
                       <span>${bucket.price.toFixed(3)}</span>
@@ -111,6 +113,10 @@ export function BucketList({ buckets, selectedIds, onToggle }: BucketListProps) 
                     <div className="text-right">
                       <span className="block text-[10px] uppercase tracking-wide opacity-50">Prob</span>
                       <span>{(bucket.price * 100).toFixed(1)}%</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="block text-[10px] uppercase tracking-wide opacity-50">Spread</span>
+                      <span>{bucket.spread !== undefined ? `${bucket.spread.toFixed(1)}%` : '--'}</span>
                     </div>
                   </div>
                 </div>

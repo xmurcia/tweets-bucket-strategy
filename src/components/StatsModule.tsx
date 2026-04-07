@@ -131,6 +131,46 @@ export function StatsModule({
     ? tweetProjection.pace24h - tweetProjection.tweetsPerHour
     : null;
 
+  // Find bucket containing projected median and check for low volume warning
+  const projectionBucketWarning = useMemo(() => {
+    if (!tweetProjection || !buckets.length) return null;
+
+    const projectedMedian = (tweetProjection.projectedRange.low + tweetProjection.projectedRange.high) / 2;
+
+    let targetBucket: Bucket | null = null;
+    for (const bucket of buckets) {
+      const rangeMatch = bucket.name.match(/^(\d+)-(\d+)/);
+      const plusMatch = bucket.name.match(/^(\d+)\+/);
+
+      if (rangeMatch) {
+        const low = parseInt(rangeMatch[1], 10);
+        const high = parseInt(rangeMatch[2], 10);
+        if (projectedMedian >= low && projectedMedian <= high) {
+          targetBucket = bucket;
+          break;
+        }
+      } else if (plusMatch) {
+        const low = parseInt(plusMatch[1], 10);
+        if (projectedMedian >= low) {
+          targetBucket = bucket;
+          break;
+        }
+      }
+    }
+
+    if (!targetBucket) return null;
+
+    const bucketPrice = targetBucket.price;
+    const totalPrice = buckets.reduce((sum, b) => sum + b.price, 0);
+    const priceShare = totalPrice > 0 ? bucketPrice / totalPrice : 0;
+
+    return {
+      bucketName: targetBucket.name,
+      priceShare,
+      isLowProbability: priceShare < 0.20,
+    };
+  }, [tweetProjection, buckets]);
+
   return (
     <div className="space-y-6">
       {/* Tweet Counter Block */}
@@ -240,14 +280,23 @@ export function StatsModule({
       {/* Projection + metrics grid */}
       {tweetProjection && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="border border-ink/10 p-4">
-            <span className="font-mono text-[10px] uppercase opacity-50 block mb-1">Projected Total</span>
+          <div className={`border p-4 ${projectionBucketWarning?.isLowProbability ? 'border-yellow-500 bg-yellow-500/10' : 'border-ink/10'}`}>
+            <span className="font-mono text-[10px] uppercase opacity-50 block mb-1">Projected Total (80% CI)</span>
             <div className="text-2xl font-bold tabular-nums">
-              ~{Math.round(tweetProjection.projectedTotal)}
+              {tweetProjection.projectedRange.low}–{tweetProjection.projectedRange.high}
             </div>
             <div className="text-xs font-mono opacity-40 mt-1">
-              {tweetProjection.projectedRange.low} – {tweetProjection.projectedRange.high}
+              ~{Math.round(tweetProjection.projectedTotal)} model estimate
             </div>
+            {projectionBucketWarning && (
+              <div className="text-[10px] font-mono mt-2 text-yellow-700">
+                {projectionBucketWarning.isLowProbability ? (
+                  <>⚠ Low probability bucket ({Math.round(projectionBucketWarning.priceShare * 100)}% of outcomes)</>
+                ) : (
+                  <span className="text-ink/40">Bucket: {projectionBucketWarning.bucketName}</span>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="border border-ink/10 p-4">
@@ -256,7 +305,12 @@ export function StatsModule({
               {Math.round(tweetProjection.confidence * 100)}%
             </div>
             <div className="text-xs font-mono opacity-40 mt-1">
-              {tweetProjection.hoursElapsed.toFixed(0)}h of data
+              {tweetProjection.hoursElapsed.toFixed(0)}h of data ·{' '}
+              {tweetProjection.rateStability === 'stable'
+                ? 'stable pace'
+                : tweetProjection.rateStability === 'unstable'
+                ? 'unstable pace'
+                : 'normal pace'}
             </div>
           </div>
 
