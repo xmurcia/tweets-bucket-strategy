@@ -787,7 +787,7 @@ export default function App() {
                 )}
 
                 <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(0,1.55fr)_minmax(21rem,0.7fr)] xl:items-start">
-                  <div className="order-1 space-y-6">
+                  <div className="order-2 xl:order-1 space-y-6">
                     <section className="space-y-4 border border-ink/10 p-5 md:p-6">
                       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
                         <div className="flex items-center gap-2">
@@ -806,8 +806,8 @@ export default function App() {
                     </section>
                   </div>
 
-                  <aside className="order-2">
-                    <div className="sticky top-6 space-y-5 xl:top-8">
+                  <aside className="order-1 xl:order-2">
+                    <div className="sticky top-0 space-y-5 xl:top-8">
                       <div className="border border-ink/10 bg-ink px-5 py-4 text-bg">
                         <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-bg/45">Action rail</div>
                         <div className="mt-2 text-xl font-medium">Size the position, then sanity-check the selected spread.</div>
