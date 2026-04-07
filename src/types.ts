@@ -223,6 +223,7 @@ export interface TweetProjection {
   projectedTotal: number;
   projectedRange: { low: number; high: number };
   confidence: number;
+  rateStability: 'stable' | 'unstable' | 'neutral';
   hoursElapsed: number;
   hoursRemaining: number;
   periodStart: string;

@@ -305,7 +305,12 @@ export function StatsModule({
               {Math.round(tweetProjection.confidence * 100)}%
             </div>
             <div className="text-xs font-mono opacity-40 mt-1">
-              {tweetProjection.hoursElapsed.toFixed(0)}h of data
+              {tweetProjection.hoursElapsed.toFixed(0)}h of data ·{' '}
+              {tweetProjection.rateStability === 'stable'
+                ? 'stable pace'
+                : tweetProjection.rateStability === 'unstable'
+                ? 'unstable pace'
+                : 'normal pace'}
             </div>
           </div>
 
