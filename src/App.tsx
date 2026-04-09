@@ -5,7 +5,7 @@ import { BetCalculator } from './components/BetCalculator';
 import { HERO_REPLAY_MIN_HISTORY_DAYS, PolymarketEvent, TweetProjection, ProjectionInsufficient, type HeroReplayHistoryPayload } from './types';
 import { searchMarkets, parseBuckets, getTrackingStats, getActiveCounts, getTweetProjection, getTweetProjectionByDate, captureHeroReplaySnapshot, getHeroReplayHistory, TrackingStats } from './services/polymarket';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowLeft, Info, TrendingUp, Sun, Moon, Copy, RotateCw } from 'lucide-react';
+import { ArrowDown, ArrowLeft, Info, TrendingUp, Sun, Moon, Copy, RotateCw } from 'lucide-react';
 import { StatsModule } from './components/StatsModule';
 import { StrategyTabs } from './components/StrategyTabs';
 
@@ -48,6 +48,7 @@ export default function App() {
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
   const autoRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedMarketRef = useRef<PolymarketEvent | null>(null);
+  const strategySectionRef = useRef<HTMLDivElement | null>(null);
   const refreshRequestIdRef = useRef(0);
   const replayHistoryRequestIdRef = useRef(0);
   const refreshInFlightRef = useRef(false);
@@ -322,6 +323,10 @@ export default function App() {
     await refreshMarketData(market, false);
   };
 
+  const handleScrollToStrategy = () => {
+    strategySectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   const nextRefreshLabel = !selectedMarket
     ? 'Next refresh in -- (select market)'
     : `Next refresh in ${formatRemainingTime(autoRefreshSecondsLeft ?? 0)}`;
@@ -444,19 +449,21 @@ export default function App() {
 
               <div className="flex items-stretch gap-2 self-start">
                 <button
+                  type="button"
                   onClick={() => {
                     void handleManualRefresh();
                   }}
                   disabled={manualRefreshDisabled}
                   aria-label={isManualRefreshing ? 'Refreshing market detail' : 'Refresh market detail'}
-                  className="flex h-12 w-12 items-center justify-center border border-ink/15 bg-bg transition-colors hover:bg-ink hover:text-bg focus:outline-none focus:ring-2 focus:ring-ink disabled:cursor-not-allowed disabled:opacity-40"
+                  className="flex h-12 w-12 cursor-pointer items-center justify-center border border-ink/15 bg-bg transition-colors hover:bg-ink hover:text-bg focus:outline-none focus:ring-2 focus:ring-ink disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <RotateCw className={`h-4 w-4 ${isManualRefreshing ? 'animate-spin' : ''}`} />
                 </button>
                 <button
+                  type="button"
                   onClick={toggleTheme}
                   aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
-                  className="flex h-12 w-12 items-center justify-center border border-ink/15 bg-bg transition-colors hover:bg-ink hover:text-bg focus:outline-none focus:ring-2 focus:ring-ink"
+                  className="flex h-12 w-12 cursor-pointer items-center justify-center border border-ink/15 bg-bg transition-colors hover:bg-ink hover:text-bg focus:outline-none focus:ring-2 focus:ring-ink"
                 >
                   {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
                 </button>
@@ -526,12 +533,12 @@ export default function App() {
                 className="space-y-8 md:space-y-10"
               >
                 <section className="border border-ink/10 bg-ink text-bg">
-                  <div className="grid gap-4 px-5 py-4 md:px-6 md:py-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(20rem,0.75fr)]">
-                    <div className="space-y-4">
+                  <div className="space-y-4 px-5 py-4 md:px-6 md:py-5">
+                    <div className="space-y-3">
                       <div className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center">
                         <button
                           onClick={() => setSelectedMarket(null)}
-                          className="inline-flex min-h-10 items-center justify-center gap-2.5 border border-bg bg-bg px-4 py-2.5 font-mono text-[11px] uppercase tracking-[0.18em] text-ink transition-colors hover:bg-transparent hover:text-bg focus:outline-none focus:ring-2 focus:ring-bg sm:justify-start"
+                          className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2.5 border border-bg bg-bg px-4 py-2.5 font-mono text-[11px] uppercase tracking-[0.18em] text-ink transition-colors hover:bg-transparent hover:text-bg focus:outline-none focus:ring-2 focus:ring-bg sm:justify-start"
                           aria-label="Go back to market selection"
                         >
                           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
@@ -545,81 +552,31 @@ export default function App() {
                         )}
                       </div>
 
-                      <div className="space-y-2">
-                        <h2 className="max-w-4xl font-serif text-2xl italic leading-snug md:text-4xl">
-                          {selectedMarket.title}
-                        </h2>
-                        <p className="max-w-3xl text-sm leading-6 text-bg/68 md:text-[15px]">
-                          Read the live signal first, then pressure-test the strategy suggestions before you commit your own exact bucket mix.
-                        </p>
+                      <h2 className="max-w-4xl font-serif text-2xl italic leading-snug md:text-4xl">
+                        {selectedMarket.title}
+                      </h2>
+                    </div>
+                  </div>
+
+                  {/* Bottom: stat bar full-width */}
+                  <div className="grid grid-cols-3 border-t border-bg/10 px-5 md:px-6">
+                    <div className="border-r border-bg/10 py-3 px-4">
+                      <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-bg/45">Buckets selected</div>
+                      <div className="mt-1 flex items-baseline gap-2">
+                        <span className="text-2xl font-semibold tabular-nums">{selectedBuckets.length}</span>
+                        <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-bg/55">Coverage {(selectedCoverage * 100).toFixed(1)}%</span>
                       </div>
                     </div>
-
-                    <div className="space-y-3">
-                      <div className="border border-bg/20 bg-bg px-4 py-3.5 text-ink">
-                        <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between">
-                          <div>
-                            <div className="font-mono text-[10px] uppercase tracking-[0.22em] opacity-45">Support this workspace</div>
-                            <div className="mt-1.5 text-base font-medium leading-6">Keep the analysis alive if this screen is helping you make better entries.</div>
-                            <p className="mt-1.5 text-sm text-ink/62">Support is promoted here on purpose so it is visible at decision time, not buried after the sizing rail.</p>
-                          </div>
-                          <div className="border border-ink/15 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-ink/58">
-                            Polygon USDC
-                          </div>
-                        </div>
-                        <div className="mt-3 grid gap-2.5">
-                          <a
-                            href="https://polymarket.com/@polete"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="group flex items-center justify-between gap-3 border border-ink bg-ink px-4 py-2.5 font-mono text-[10px] uppercase tracking-[0.18em] text-bg transition-colors hover:bg-bg hover:text-ink focus:outline-none focus:ring-2 focus:ring-ink"
-                          >
-                            <span className="flex flex-col gap-0.5 text-left">
-                              <span>@polete on Polymarket</span>
-                              <span className="normal-case text-[11px] tracking-normal opacity-75">Send a tip where the trading context already lives</span>
-                            </span>
-                            <span aria-hidden="true">→</span>
-                          </a>
-                          <div className="flex flex-col gap-2.5 border border-ink/15 bg-ink/[0.04] px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between">
-                            <div>
-                              <span className="block font-mono text-[10px] uppercase tracking-[0.18em] opacity-45">Wallet</span>
-                              <span className="mt-1 block font-mono text-sm tracking-[0.08em]" title={TIPS_ADDRESS}>{truncatedAddress}</span>
-                            </div>
-                            <button
-                              onClick={handleCopyAddress}
-                              aria-label="Copy wallet address"
-                              className="inline-flex items-center justify-center gap-1.5 border border-ink/20 bg-bg px-3 py-2 font-mono text-[10px] uppercase tracking-[0.18em] text-ink transition-colors hover:bg-ink hover:text-bg focus:outline-none focus:ring-2 focus:ring-ink"
-                            >
-                              {copied ? (
-                                <span>Copied</span>
-                              ) : (
-                                <>
-                                  <Copy className="h-3 w-3" aria-hidden="true" />
-                                  <span>Copy address</span>
-                                </>
-                              )}
-                            </button>
-                          </div>
-                        </div>
+                    <div className="border-r border-bg/10 py-3 px-4">
+                      <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-bg/45">Budget</div>
+                      <div className="mt-1 flex items-baseline gap-2">
+                        <span className="text-2xl font-semibold tabular-nums">${budget.toFixed(0)}</span>
+                        <span className="text-xs text-bg/55">adjustable in action rail</span>
                       </div>
-
-                      <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
-                        <div className="border border-bg/15 px-4 py-4">
-                          <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-bg/45">Buckets selected</div>
-                          <div className="mt-2 text-3xl font-semibold tabular-nums">{selectedBuckets.length}</div>
-                          <div className="mt-2 font-mono text-[11px] uppercase tracking-[0.18em] text-bg/55">Coverage {(selectedCoverage * 100).toFixed(1)}%</div>
-                        </div>
-                        <div className="border border-bg/15 px-4 py-4">
-                          <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-bg/45">Budget</div>
-                          <div className="mt-2 text-3xl font-semibold tabular-nums">${budget.toFixed(0)}</div>
-                          <div className="mt-2 text-sm text-bg/60">Adjustable in the action rail</div>
-                        </div>
-                        <div className="border border-bg/15 px-4 py-4">
-                          <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-bg/45">Decision flow</div>
-                          <div className="mt-2 text-lg font-medium">Signal -&gt; Strategy -&gt; Sizing</div>
-                          <div className="mt-2 text-sm text-bg/60">Everything below is arranged in that order.</div>
-                        </div>
-                      </div>
+                    </div>
+                    <div className="py-3 px-4">
+                      <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-bg/45">Decision flow</div>
+                      <div className="mt-1 text-sm font-medium">Signal → Strategy → Sizing</div>
                     </div>
                   </div>
                 </section>
@@ -652,7 +609,7 @@ export default function App() {
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: 0.2 }}
-                      className="grid items-stretch gap-6 xl:grid-cols-[minmax(0,1.7fr)_minmax(20rem,0.9fr)]"
+                      className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.8fr)_minmax(19rem,0.85fr)]"
                     >
                       <div>
                         <StatsModule
@@ -667,9 +624,9 @@ export default function App() {
                         />
                       </div>
 
-                      <div className="flex h-full flex-col gap-4">
+                      <div className="flex h-full flex-col gap-3">
                         {tweetProjection && tweetProjection.rangeProbabilities.length > 0 && (
-                          <div className="space-y-4 border border-ink/10 bg-ink/[0.03] p-5">
+                          <div className="space-y-3 border border-ink/10 bg-ink/[0.03] p-4">
                             <div className="flex items-center justify-between gap-3">
                               <span className="block font-mono text-[10px] uppercase tracking-[0.22em] opacity-50">Top projected buckets</span>
                               <span className="font-mono text-[10px] uppercase tracking-[0.16em] opacity-35">Highest model probability</span>
@@ -679,7 +636,7 @@ export default function App() {
                                 .sort((a, b) => b.probability - a.probability)
                                 .slice(0, 3)
                                 .map((rp, i) => (
-                                  <div key={rp.range} className="flex items-center gap-3 border border-ink/8 bg-bg px-3 py-3">
+                                  <div key={rp.range} className="flex items-center gap-3 border border-ink/8 bg-bg px-3 py-2.5">
                                     <span className="w-5 font-mono text-[10px] opacity-30">{i + 1}</span>
                                     <div className="flex-1">
                                       <div className="mb-1 flex justify-between">
@@ -696,12 +653,12 @@ export default function App() {
                           </div>
                         )}
 
-                        <div className="space-y-4 border border-ink/10 p-5">
-                          <div className="flex items-center justify-between gap-3">
+                        <div className="space-y-3 border border-ink/10 p-4">
+                          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
                             <div>
-                              <h4 className="font-mono text-[10px] uppercase tracking-[0.22em] opacity-55">Replay history</h4>
-                              <p className="mt-2 text-sm leading-6 text-ink/62">
-                                Replay availability is derived from stored event history and unlocks only after {HERO_REPLAY_MIN_HISTORY_DAYS} full days.
+                              <h4 className="font-mono text-[10px] uppercase tracking-[0.22em] opacity-55">Replay + market context</h4>
+                              <p className="mt-1.5 text-sm leading-5 text-ink/62">
+                                Replay unlocks after {HERO_REPLAY_MIN_HISTORY_DAYS} full days of snapshots. Keep this next to the live signal for faster decision loops.
                               </p>
                             </div>
                             <div className={`inline-flex items-center gap-2 border px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.2em] ${replayStatus.tone}`}>
@@ -709,61 +666,55 @@ export default function App() {
                             </div>
                           </div>
 
-                          <div className={`border px-4 py-3 text-sm ${replayStatus.tone}`}>
+                          <div className={`border px-3 py-2.5 text-sm ${replayStatus.tone}`}>
                             {replayStatus.detail}
                           </div>
 
-                          <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
-                            <div className="border border-ink/10 bg-ink/[0.03] px-4 py-4">
+                          <div className="grid grid-cols-3 gap-2">
+                            <div className="border border-ink/10 bg-ink/[0.03] px-3 py-2.5">
                               <div className="font-mono text-[10px] uppercase tracking-[0.2em] opacity-45">Snapshots</div>
-                              <div className="mt-2 text-lg font-medium">
+                              <div className="mt-1.5 text-base font-medium">
                                 {isHeroReplayHistoryLoading ? '...' : (replayAvailability?.snapshotCount ?? 0).toLocaleString()}
                               </div>
                             </div>
-                            <div className="border border-ink/10 bg-ink/[0.03] px-4 py-4">
-                              <div className="font-mono text-[10px] uppercase tracking-[0.2em] opacity-45">History window</div>
-                              <div className="mt-2 text-lg font-medium">
+                            <div className="border border-ink/10 bg-ink/[0.03] px-3 py-2.5">
+                              <div className="font-mono text-[10px] uppercase tracking-[0.2em] opacity-45">Window</div>
+                              <div className="mt-1.5 text-base font-medium">
                                 {isHeroReplayHistoryLoading ? '...' : `${replayHistorySpanDays.toFixed(1)}d`}
                               </div>
                             </div>
-                            <div className="border border-ink/10 bg-ink/[0.03] px-4 py-4">
-                              <div className="font-mono text-[10px] uppercase tracking-[0.2em] opacity-45">Replay gate</div>
-                              <div className="mt-2 text-lg font-medium">
+                            <div className="border border-ink/10 bg-ink/[0.03] px-3 py-2.5">
+                              <div className="font-mono text-[10px] uppercase tracking-[0.2em] opacity-45">Gate</div>
+                              <div className="mt-1.5 text-base font-medium">
                                 {replayAvailability?.isReplayEligible ? 'Enabled' : 'Locked'}
                               </div>
                             </div>
                           </div>
-                        </div>
 
-                        <div className="space-y-4 border border-ink/10 p-5">
-                          <div>
-                            <h4 className="font-mono text-[10px] uppercase tracking-[0.22em] opacity-55">Market context</h4>
-                            <p className="mt-2 text-sm leading-6 text-ink/62">
-                              Operational links stay near the signal so the action rail can stay focused on actual position construction.
+                          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                            <p className="text-sm leading-5 text-ink/60">
+                              Suggested coverage comes first. Manual bucket overrides are immediately below in Strategy.
                             </p>
+                            <button
+                              type="button"
+                              onClick={handleScrollToStrategy}
+                              className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 border border-ink bg-ink px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-bg transition-colors hover:bg-bg hover:text-ink focus:outline-none focus:ring-2 focus:ring-ink"
+                            >
+                              <ArrowDown className="h-3.5 w-3.5" aria-hidden="true" />
+                              Move to strategy
+                            </button>
                           </div>
+
                           {selectedMarket.slug && (
                             <a
                               href={`https://polymarket.com/event/${selectedMarket.slug}`}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="inline-flex items-center gap-2 border border-ink/15 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] opacity-70 transition-colors hover:bg-ink hover:text-bg focus:outline-none focus:ring-2 focus:ring-ink"
+                              className="inline-flex min-h-10 items-center gap-2 self-start border border-ink/15 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-ink/75 transition-colors hover:border-ink hover:bg-ink hover:text-bg focus:outline-none focus:ring-2 focus:ring-ink"
                             >
                               View on Polymarket →
                             </a>
                           )}
-                          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                            <div className="border border-ink/10 bg-ink/[0.03] px-4 py-4">
-                              <div className="font-mono text-[10px] uppercase tracking-[0.2em] opacity-45">Source</div>
-                              <div className="mt-2 text-lg font-medium">Live market + tracker data</div>
-                              <p className="mt-2 text-sm text-ink/60">Use this to validate whether the current market shape is keeping up with tweet pace.</p>
-                            </div>
-                            <div className="border border-ink/10 bg-ink/[0.03] px-4 py-4">
-                              <div className="font-mono text-[10px] uppercase tracking-[0.2em] opacity-45">Action</div>
-                              <div className="mt-2 text-lg font-medium">Move to strategy below</div>
-                              <p className="mt-2 text-sm text-ink/60">Suggested coverage comes first, manual bucket overrides come right after.</p>
-                            </div>
-                          </div>
                         </div>
                       </div>
                     </motion.div>
@@ -772,6 +723,8 @@ export default function App() {
 
                 {buckets.length > 0 && (
                   <motion.div
+                    id="strategy-section"
+                    ref={strategySectionRef}
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.3 }}
@@ -856,6 +809,53 @@ export default function App() {
                             Select buckets to see viability analysis.
                           </p>
                         )}
+                      </div>
+
+                      <div className="border border-ink/10 bg-bg p-4 text-ink">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="font-mono text-[10px] uppercase tracking-[0.22em] opacity-45">Support this workspace</div>
+                            <div className="mt-1 text-sm font-medium leading-5">Keep the analysis alive if this screen is helping you make better entries.</div>
+                          </div>
+                          <div className="shrink-0 border border-ink/15 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-ink/58">
+                            Polygon USDC
+                          </div>
+                        </div>
+                        <div className="mt-2.5 grid gap-2">
+                          <a
+                            href="https://polymarket.com/@polete"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="group flex min-h-10 items-center justify-between gap-3 border border-ink bg-ink px-4 py-2 font-mono text-[10px] uppercase tracking-[0.18em] text-bg transition-colors hover:bg-bg hover:text-ink focus:outline-none focus:ring-2 focus:ring-ink"
+                          >
+                            <span className="flex flex-col gap-0.5 text-left">
+                              <span>@polete on Polymarket</span>
+                              <span className="normal-case text-[11px] tracking-normal opacity-75">Send a tip where the trading context already lives</span>
+                            </span>
+                            <span aria-hidden="true">→</span>
+                          </a>
+                          <div className="flex items-center justify-between gap-2 border border-ink/15 bg-ink/[0.04] px-4 py-2">
+                            <div>
+                              <span className="block font-mono text-[10px] uppercase tracking-[0.18em] opacity-45">Wallet</span>
+                              <span className="mt-0.5 block font-mono text-sm tracking-[0.08em]" title={TIPS_ADDRESS}>{truncatedAddress}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={handleCopyAddress}
+                              aria-label="Copy wallet address"
+                              className="inline-flex min-h-9 cursor-pointer items-center justify-center gap-1.5 border border-ink/20 bg-bg px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-ink transition-colors hover:bg-ink hover:text-bg focus:outline-none focus:ring-2 focus:ring-ink"
+                            >
+                              {copied ? (
+                                <span>Copied</span>
+                              ) : (
+                                <>
+                                  <Copy className="h-3 w-3" aria-hidden="true" />
+                                  <span>Copy address</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </div>
                       </div>
 
                     </div>

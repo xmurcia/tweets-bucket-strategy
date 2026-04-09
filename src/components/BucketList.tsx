@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React from 'react';
 import { Bucket } from '../types';
 import { cn } from '../lib/utils';
 import { Check } from 'lucide-react';
@@ -10,13 +10,6 @@ interface BucketListProps {
 }
 
 export function BucketList({ buckets, selectedIds, onToggle }: BucketListProps) {
-  const handleKeyDown = useCallback((e: React.KeyboardEvent, bucketId: string) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      onToggle(bucketId);
-    }
-  }, [onToggle]);
-
   return (
     <div className="border-t border-ink/15" aria-label="Outcome buckets">
       <div className="hidden md:block" role="table" aria-label="Outcome buckets desktop table">
@@ -32,15 +25,14 @@ export function BucketList({ buckets, selectedIds, onToggle }: BucketListProps) 
           {buckets.map((bucket) => {
             const isSelected = selectedIds.has(bucket.id);
             return (
-              <div
+              <button
+                type="button"
                 key={bucket.id}
                 role="row"
-                tabIndex={0}
-                aria-selected={isSelected}
+                aria-pressed={isSelected}
                 onClick={() => onToggle(bucket.id)}
-                onKeyDown={(e) => handleKeyDown(e, bucket.id)}
                 className={cn(
-                  "group grid grid-cols-[48px_minmax(0,1.7fr)_0.8fr_0.8fr_0.6fr] cursor-pointer items-center border px-4 py-4 transition-colors focus:outline-none focus:ring-2 focus:ring-ink focus:ring-inset",
+                  "group grid w-full grid-cols-[48px_minmax(0,1.7fr)_0.8fr_0.8fr_0.6fr] cursor-pointer items-center border px-4 py-4 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-ink focus:ring-inset",
                   isSelected ? "border-ink bg-ink text-bg" : "border-ink/10 bg-bg hover:border-ink/25 hover:bg-ink/[0.03]"
                 )}
               >
@@ -66,7 +58,7 @@ export function BucketList({ buckets, selectedIds, onToggle }: BucketListProps) 
                 <div role="cell" className="text-right font-mono text-sm tabular-nums">${bucket.price.toFixed(3)}</div>
                 <div role="cell" className="text-right font-mono text-sm tabular-nums">{(bucket.price * 100).toFixed(1)}%</div>
                 <div role="cell" className="text-right font-mono text-sm tabular-nums">{bucket.spread !== undefined ? `${bucket.spread.toFixed(1)}%` : '--'}</div>
-              </div>
+              </button>
             );
           })}
         </div>
@@ -76,15 +68,14 @@ export function BucketList({ buckets, selectedIds, onToggle }: BucketListProps) 
         {buckets.map((bucket) => {
           const isSelected = selectedIds.has(bucket.id);
           return (
-            <div
+            <button
+              type="button"
               key={bucket.id}
               role="listitem"
-              tabIndex={0}
-              aria-selected={isSelected}
+              aria-pressed={isSelected}
               onClick={() => onToggle(bucket.id)}
-              onKeyDown={(e) => handleKeyDown(e, bucket.id)}
               className={cn(
-                "group cursor-pointer space-y-3 border p-4 transition-colors focus:outline-none focus:ring-2 focus:ring-ink focus:ring-inset",
+                "group w-full cursor-pointer space-y-3 border p-4 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-ink focus:ring-inset",
                 isSelected ? "border-ink bg-ink text-bg" : "border-ink/10 bg-bg hover:border-ink/25 hover:bg-ink/[0.03]"
               )}
             >
@@ -121,7 +112,7 @@ export function BucketList({ buckets, selectedIds, onToggle }: BucketListProps) 
                   </div>
                 </div>
               </div>
-            </div>
+            </button>
           );
         })}
       </div>

@@ -279,17 +279,17 @@ export function StatsModule({
 
       {/* Projection + metrics grid */}
       {tweetProjection && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className={`border p-4 ${projectionBucketWarning?.isLowProbability ? 'border-yellow-500 bg-yellow-500/10' : 'border-ink/10'}`}>
-            <span className="font-mono text-[10px] uppercase opacity-50 block mb-1">Projected Total (80% CI)</span>
-            <div className="text-2xl font-bold tabular-nums">
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+          <div className={`col-span-2 border p-3 xl:col-span-1 ${projectionBucketWarning?.isLowProbability ? 'border-yellow-500 bg-yellow-500/10' : 'border-ink/10'}`}>
+            <span className="mb-1 block font-mono text-[10px] uppercase opacity-50">Projected Total (80% CI)</span>
+            <div className="text-xl font-bold tabular-nums md:text-2xl">
               {tweetProjection.projectedRange.low}–{tweetProjection.projectedRange.high}
             </div>
-            <div className="text-xs font-mono opacity-40 mt-1">
+            <div className="mt-1 text-xs font-mono opacity-40">
               ~{Math.round(tweetProjection.projectedTotal)} model estimate
             </div>
             {projectionBucketWarning && (
-              <div className="text-[10px] font-mono mt-2 text-yellow-700">
+              <div className="mt-2 text-[10px] font-mono text-yellow-700">
                 {projectionBucketWarning.isLowProbability ? (
                   <>⚠ Low probability bucket ({Math.round(projectionBucketWarning.priceShare * 100)}% of outcomes)</>
                 ) : (
@@ -299,12 +299,12 @@ export function StatsModule({
             )}
           </div>
 
-          <div className="border border-ink/10 p-4">
-            <span className="font-mono text-[10px] uppercase opacity-50 block mb-1">Confidence</span>
-            <div className="text-2xl font-bold tabular-nums">
+          <div className="border border-ink/10 p-3">
+            <span className="mb-1 block font-mono text-[10px] uppercase opacity-50">Confidence</span>
+            <div className="text-xl font-bold tabular-nums md:text-2xl">
               {Math.round(tweetProjection.confidence * 100)}%
             </div>
-            <div className="text-xs font-mono opacity-40 mt-1">
+            <div className="mt-1 text-xs font-mono opacity-40">
               {tweetProjection.hoursElapsed.toFixed(0)}h of data ·{' '}
               {tweetProjection.rateStability === 'stable'
                 ? 'stable pace'
@@ -314,9 +314,9 @@ export function StatsModule({
             </div>
           </div>
 
-          <div className="border border-ink/10 p-4">
-            <span className="font-mono text-[10px] uppercase opacity-50 block mb-1">Time Remaining</span>
-            <div className="text-2xl font-bold tabular-nums">
+          <div className="border border-ink/10 p-3">
+            <span className="mb-1 block font-mono text-[10px] uppercase opacity-50">Time Remaining</span>
+            <div className="text-xl font-bold tabular-nums md:text-2xl">
               {tweetProjection.hoursRemaining.toFixed(0)}
               <span className="text-sm opacity-50 ml-1">hrs</span>
             </div>
@@ -324,7 +324,7 @@ export function StatsModule({
               const totalHours = tweetProjection.hoursElapsed + tweetProjection.hoursRemaining;
               const pct = totalHours > 0 ? (tweetProjection.hoursElapsed / totalHours) * 100 : 0;
               return (
-                <div className="w-full bg-bg h-1 mt-2 overflow-hidden border border-ink/10"
+                <div className="mt-2 h-1 w-full overflow-hidden border border-ink/10 bg-bg"
                   role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100} aria-label="Time progress">
                   <div className="bg-ink h-full transition-all duration-1000" style={{ width: `${Math.min(100, pct)}%` }} />
                 </div>
@@ -332,12 +332,12 @@ export function StatsModule({
             })()}
           </div>
 
-          <div className="border border-ink/10 p-4">
-            <span className="font-mono text-[10px] uppercase opacity-50 block mb-1">Tweets left est.</span>
-            <div className="text-2xl font-bold tabular-nums">
+          <div className="border border-ink/10 p-3">
+            <span className="mb-1 block font-mono text-[10px] uppercase opacity-50">Tweets left est.</span>
+            <div className="text-xl font-bold tabular-nums md:text-2xl">
               ~{Math.max(0, Math.round(tweetProjection.projectedTotal - tweetProjection.currentCount))}
             </div>
-            <div className="text-xs font-mono opacity-40 mt-1">
+            <div className="mt-1 text-xs font-mono opacity-40">
               at {tweetProjection.tweetsPerHour.toFixed(1)}/hr
             </div>
           </div>
