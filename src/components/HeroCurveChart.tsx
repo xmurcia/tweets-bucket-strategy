@@ -121,7 +121,7 @@ export function HeroCurveChart({
           type="button"
           onClick={handlePrimaryAction}
           disabled={replayUnavailable}
-          className="inline-flex items-center border border-bg/35 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-bg transition-colors hover:bg-bg hover:text-ink disabled:cursor-not-allowed disabled:border-bg/20 disabled:text-bg/35"
+          className="inline-flex min-h-9 cursor-pointer items-center border border-bg/35 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-bg transition-colors hover:border-bg hover:bg-bg hover:text-ink focus:outline-none focus:ring-2 focus:ring-bg disabled:cursor-not-allowed disabled:border-bg/20 disabled:text-bg/35"
         >
           {primaryActionLabel}
         </button>
@@ -129,7 +129,7 @@ export function HeroCurveChart({
           type="button"
           onClick={replayPlayback}
           disabled={replayUnavailable}
-          className="inline-flex items-center border border-bg/35 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-bg transition-colors hover:bg-bg hover:text-ink disabled:cursor-not-allowed disabled:border-bg/20 disabled:text-bg/35"
+          className="inline-flex min-h-9 cursor-pointer items-center border border-bg/35 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-bg transition-colors hover:border-bg hover:bg-bg hover:text-ink focus:outline-none focus:ring-2 focus:ring-bg disabled:cursor-not-allowed disabled:border-bg/20 disabled:text-bg/35"
         >
           Replay
         </button>

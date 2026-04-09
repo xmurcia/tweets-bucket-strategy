@@ -299,12 +299,13 @@ export function StrategyTabs({ buckets, tweetProjection, budget, onApplyStrategy
         <div className="grid grid-cols-3 border border-ink/10 bg-bg">
         {(Object.keys(TAB_META) as TabId[]).map(tab => (
           <button
+            type="button"
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`px-2 py-3 text-center font-mono text-[9px] uppercase tracking-wide transition-colors focus:outline-none focus:ring-2 focus:ring-ink sm:px-4 sm:text-[10px] sm:tracking-widest ${
+            className={`cursor-pointer px-2 py-3 text-center font-mono text-[9px] uppercase tracking-wide transition-colors focus:outline-none focus:ring-2 focus:ring-ink sm:px-4 sm:text-[10px] sm:tracking-widest ${
               activeTab === tab
                 ? 'bg-ink text-bg'
-                : 'text-ink/40 hover:bg-ink/[0.03] hover:text-ink/70'
+                : 'text-ink/45 hover:bg-ink/10 hover:text-ink'
             }`}
             aria-selected={activeTab === tab}
             role="tab"
@@ -394,7 +395,7 @@ export function StrategyTabs({ buckets, tweetProjection, budget, onApplyStrategy
                 return (
                   <div
                     key={b.id}
-                    className="grid grid-cols-12 items-center border-b border-ink/5 px-4 py-3 text-sm transition-colors last:border-0 hover:bg-ink/[0.02]"
+                    className="grid grid-cols-12 items-center border-b border-ink/5 px-4 py-3 text-sm last:border-0"
                   >
                     <span className="col-span-3 font-mono font-bold">{b.name}</span>
                     <span className="col-span-2 text-right font-mono">{formatPct(b.price)}</span>
@@ -482,8 +483,9 @@ export function StrategyTabs({ buckets, tweetProjection, budget, onApplyStrategy
               </div>
             </div>
             <button
+              type="button"
               onClick={handleApply}
-              className="w-full bg-ink px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-bg transition-opacity hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-ink focus:ring-offset-2 md:w-auto"
+              className="w-full cursor-pointer bg-ink px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-bg transition-colors hover:bg-ink/85 focus:outline-none focus:ring-2 focus:ring-ink focus:ring-offset-2 md:w-auto"
             >
               Apply selection ↓
             </button>
