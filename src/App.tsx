@@ -22,6 +22,61 @@ const buildReplayCoordinationKey = (market: Pick<PolymarketEvent, 'id' | 'slug'>
   return `${market.id}::${market.slug ?? ''}`;
 };
 
+type XWidgetApi = {
+  widgets?: {
+    createTimeline: (
+      dataSource: { sourceType: 'profile'; screenName: string },
+      target: HTMLElement,
+      options?: Record<string, string | number | boolean>
+    ) => Promise<HTMLElement>;
+  };
+};
+
+type XWidgetWindow = Window & typeof globalThis & {
+  twttr?: XWidgetApi;
+};
+
+const X_WIDGETS_SCRIPT_SRC = 'https://platform.twitter.com/widgets.js';
+let xWidgetsScriptPromise: Promise<void> | null = null;
+
+const loadXWidgetsScript = async (): Promise<void> => {
+  if (typeof window === 'undefined') return;
+
+  const widgetWindow = window as XWidgetWindow;
+  if (widgetWindow.twttr?.widgets?.createTimeline) return;
+  if (xWidgetsScriptPromise) return xWidgetsScriptPromise;
+
+  xWidgetsScriptPromise = new Promise<void>((resolve, reject) => {
+    const existingScript = document.querySelector<HTMLScriptElement>(`script[src="${X_WIDGETS_SCRIPT_SRC}"]`);
+
+    if (existingScript) {
+      if (widgetWindow.twttr?.widgets?.createTimeline) {
+        resolve();
+        return;
+      }
+
+      existingScript.addEventListener('load', () => resolve(), { once: true });
+      existingScript.addEventListener('error', () => {
+        xWidgetsScriptPromise = null;
+        reject(new Error('Failed to load X timeline widget script.'));
+      }, { once: true });
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = X_WIDGETS_SCRIPT_SRC;
+    script.async = true;
+    script.addEventListener('load', () => resolve(), { once: true });
+    script.addEventListener('error', () => {
+      xWidgetsScriptPromise = null;
+      reject(new Error('Failed to load X timeline widget script.'));
+    }, { once: true });
+    document.body.appendChild(script);
+  });
+
+  return xWidgetsScriptPromise;
+};
+
 export default function App() {
   const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
   const AUTO_REFRESH_RETRY_DELAY_MS = 10 * 1000;
@@ -37,6 +92,8 @@ export default function App() {
   const [heroReplayHistory, setHeroReplayHistory] = useState<HeroReplayHistoryPayload | null>(null);
   const [heroReplayHistoryError, setHeroReplayHistoryError] = useState<string | null>(null);
   const [isHeroReplayHistoryLoading, setIsHeroReplayHistoryLoading] = useState(false);
+  const [isTimelineLoading, setIsTimelineLoading] = useState(false);
+  const [timelineError, setTimelineError] = useState<string | null>(null);
   const [heroReplayCoordinationKey, setHeroReplayCoordinationKey] = useState<string | null>(null);
   const [heroReplayHistoryVersion, setHeroReplayHistoryVersion] = useState(0);
   const [heroReplayLiveVersion, setHeroReplayLiveVersion] = useState(0);
@@ -49,8 +106,11 @@ export default function App() {
   const autoRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedMarketRef = useRef<PolymarketEvent | null>(null);
   const strategySectionRef = useRef<HTMLDivElement | null>(null);
+  const timelineContainerRef = useRef<HTMLDivElement | null>(null);
   const refreshRequestIdRef = useRef(0);
   const replayHistoryRequestIdRef = useRef(0);
+  const timelineRequestIdRef = useRef(0);
+  const timelineTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshInFlightRef = useRef(false);
 
   const TIPS_ADDRESS = '0x137789060E41030417b7835B6647EFe9b712F6F3';
@@ -92,6 +152,64 @@ export default function App() {
     const counts = await getActiveCounts();
     setActiveCounts(counts);
   };
+
+  const clearTimelineTimeout = React.useCallback(() => {
+    if (timelineTimeoutRef.current !== null) {
+      clearTimeout(timelineTimeoutRef.current);
+      timelineTimeoutRef.current = null;
+    }
+  }, []);
+
+  const loadElonTimeline = React.useCallback(async () => {
+    const container = timelineContainerRef.current;
+    if (!container) return;
+
+    const requestId = ++timelineRequestIdRef.current;
+    setIsTimelineLoading(true);
+    setTimelineError(null);
+    clearTimelineTimeout();
+
+    while (container.firstChild) {
+      container.removeChild(container.firstChild);
+    }
+
+    timelineTimeoutRef.current = window.setTimeout(() => {
+      if (timelineRequestIdRef.current !== requestId) return;
+      setIsTimelineLoading(false);
+      setTimelineError('Timeline is taking too long to load right now.');
+    }, 8000);
+
+    try {
+      await loadXWidgetsScript();
+      const widgetWindow = window as XWidgetWindow;
+      const createTimeline = widgetWindow.twttr?.widgets?.createTimeline;
+
+      if (!createTimeline) {
+        throw new Error('X timeline widget API unavailable.');
+      }
+
+      await createTimeline(
+        { sourceType: 'profile', screenName: 'elonmusk' },
+        container,
+        {
+          height: 560,
+          theme: dark ? 'dark' : 'light',
+          chrome: 'noheader nofooter noborders transparent',
+          dnt: true,
+        }
+      );
+
+      if (timelineRequestIdRef.current !== requestId) return;
+      clearTimelineTimeout();
+      setIsTimelineLoading(false);
+    } catch (error) {
+      if (timelineRequestIdRef.current !== requestId) return;
+      clearTimelineTimeout();
+      setIsTimelineLoading(false);
+      setTimelineError('Could not load the @elonmusk timeline right now.');
+      console.error('Timeline widget load failed:', error);
+    }
+  }, [clearTimelineTimeout, dark]);
 
   React.useEffect(() => {
     loadActiveCounts();
@@ -262,6 +380,30 @@ export default function App() {
   }, [AUTO_REFRESH_INTERVAL_MS, AUTO_REFRESH_RETRY_DELAY_MS, clearAutoRefresh, refreshMarketData]);
 
   const selectedMarketId = selectedMarket?.id;
+
+  useEffect(() => {
+    if (!selectedMarketId) {
+      clearTimelineTimeout();
+      timelineRequestIdRef.current += 1;
+      setIsTimelineLoading(false);
+      setTimelineError(null);
+
+      const container = timelineContainerRef.current;
+      if (container) {
+        while (container.firstChild) {
+          container.removeChild(container.firstChild);
+        }
+      }
+      return;
+    }
+
+    void loadElonTimeline();
+
+    return () => {
+      timelineRequestIdRef.current += 1;
+      clearTimelineTimeout();
+    };
+  }, [clearTimelineTimeout, loadElonTimeline, selectedMarketId]);
 
   useEffect(() => {
     if (!selectedMarketId) {
@@ -771,6 +913,57 @@ export default function App() {
                         budget={budget}
                         onBudgetChange={setBudget}
                       />
+
+                      <div className="space-y-3 border border-ink/10 bg-bg p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <h4 className="font-mono text-[10px] uppercase tracking-[0.22em] opacity-55">Latest from @elonmusk</h4>
+                          <span className="border border-ink/15 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.18em] text-ink/55">
+                            Official X embed
+                          </span>
+                        </div>
+
+                        <div className="relative overflow-hidden border border-ink/10 bg-bg">
+                          {isTimelineLoading && (
+                            <div className="absolute inset-0 z-10 flex flex-col justify-center gap-3 bg-bg/95 px-4">
+                              <div className="h-4 w-40 animate-pulse bg-ink/10" />
+                              <div className="h-3 w-full animate-pulse bg-ink/8" />
+                              <div className="h-3 w-5/6 animate-pulse bg-ink/8" />
+                              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink/52">Loading @elonmusk timeline...</p>
+                            </div>
+                          )}
+
+                          {timelineError ? (
+                            <div className="flex min-h-[560px] flex-col items-start justify-center gap-3 px-4 py-5">
+                              <p className="text-sm text-ink/65">{timelineError}</p>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void loadElonTimeline();
+                                }}
+                                className="inline-flex min-h-9 items-center justify-center border border-ink/20 bg-bg px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-ink transition-colors hover:bg-ink hover:text-bg focus:outline-none focus:ring-2 focus:ring-ink"
+                              >
+                                Retry embed
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="h-[560px] overflow-y-auto">
+                              <div ref={timelineContainerRef} className="min-h-[560px] w-full" />
+                            </div>
+                          )}
+
+                          {!isTimelineLoading && !timelineError && (
+                            <div className="border-t border-ink/10 px-3 py-2 font-mono text-[9px] uppercase tracking-[0.16em] text-ink/45">
+                              If the embed is blocked, open <a href="https://x.com/elonmusk" target="_blank" rel="noopener noreferrer" className="underline underline-offset-3">x.com/elonmusk</a>
+                            </div>
+                          )}
+                        </div>
+
+                        {isTimelineLoading && (
+                          <div className="space-y-2 text-sm text-ink/58">
+                            <p>Pulling official timeline widget...</p>
+                          </div>
+                        )}
+                      </div>
 
                       <div className="space-y-4 border border-ink/10 bg-ink/[0.03] p-5">
                         <div>
