@@ -1,6 +1,7 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
+import fs from "fs";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 
@@ -659,9 +660,23 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
+    const indexHtmlPath = path.join(distPath, 'index.html');
+    const hasIndexHtml = fs.existsSync(indexHtmlPath);
+
+    if (!hasIndexHtml) {
+      console.error(`[startup] Missing production frontend bundle: ${indexHtmlPath}`);
+    }
+
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+      if (!hasIndexHtml) {
+        res.status(500).json({
+          error: 'Production frontend bundle missing: dist/index.html. Run `npm run build` before starting the server in production.',
+        });
+        return;
+      }
+
+      res.sendFile(indexHtmlPath);
     });
   }
 
