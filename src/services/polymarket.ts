@@ -4,51 +4,6 @@ import { isDateInPast } from '../utils/datetime';
 
 export type { TrackingStats } from '../types';
 
-export interface TokenQuote {
-  ask?: number;
-  bid?: number;
-  spread?: number;
-}
-
-export interface ElonPost {
-  id: string;
-  text: string;
-  createdAt: string;
-  url: string;
-}
-
-export interface ElonPostAuthor {
-  name: string;
-  handle: string;
-  avatarUrl: string | null;
-}
-
-export interface GetElonPostsParams {
-  startDate?: string;
-  endDate?: string;
-  limit?: number;
-}
-
-export interface ElonPostsResponse {
-  author: ElonPostAuthor;
-  items: ElonPost[];
-}
-
-export async function getElonPosts(params: GetElonPostsParams): Promise<ElonPostsResponse> {
-  const query = new URLSearchParams();
-  if (params.startDate) query.set('startDate', params.startDate);
-  if (params.endDate) query.set('endDate', params.endDate);
-  if (params.limit !== undefined) query.set('limit', String(params.limit));
-
-  const queryString = query.toString();
-  const response = await fetch(`/api/polymarket/elon-posts${queryString ? `?${queryString}` : ''}`);
-  if (!response.ok) {
-    throw new Error('Failed to fetch Elon posts');
-  }
-
-  return await response.json() as ElonPostsResponse;
-}
-
 export async function searchMarkets(query: string): Promise<PolymarketEvent[]> {
   try {
     const response = await fetch(`/api/polymarket/events?query=${encodeURIComponent(query)}`);
@@ -115,37 +70,6 @@ export function parseNumericField(value: unknown): number | undefined {
     return Number.isFinite(parsed) ? parsed : undefined;
   }
   return undefined;
-}
-
-export async function getTokenQuotes(tokenIds: string[]): Promise<Record<string, TokenQuote>> {
-  const uniqueTokenIds = Array.from(new Set(tokenIds.filter(Boolean)));
-  if (uniqueTokenIds.length === 0) return {};
-
-  try {
-    const params = new URLSearchParams({ tokenIds: uniqueTokenIds.join(',') });
-    const response = await fetch(`/api/polymarket/token-quotes?${params.toString()}`);
-    if (!response.ok) throw new Error('Failed to fetch token quotes');
-
-    const payload = await response.json() as {
-      quotes?: Record<string, { ask?: number | string; bid?: number | string; spread?: number | string }>;
-    };
-
-    const quotes = payload.quotes ?? {};
-    const normalized: Record<string, TokenQuote> = {};
-
-    for (const [tokenId, quote] of Object.entries(quotes)) {
-      normalized[tokenId] = {
-        ask: parseNumericField(quote.ask),
-        bid: parseNumericField(quote.bid),
-        spread: parseNumericField(quote.spread),
-      };
-    }
-
-    return normalized;
-  } catch (error) {
-    console.error('Error fetching token quotes:', error);
-    return {};
-  }
 }
 
 export async function getActiveCounts(): Promise<TrackingStats[]> {
