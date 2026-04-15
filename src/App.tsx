@@ -3,7 +3,7 @@ import { MarketSelector } from './components/MarketSelector';
 import { BucketList } from './components/BucketList';
 import { BetCalculator } from './components/BetCalculator';
 import { HERO_REPLAY_MIN_HISTORY_DAYS, PolymarketEvent, TweetProjection, ProjectionInsufficient, type HeroReplayHistoryPayload } from './types';
-import { searchMarkets, parseBuckets, getTrackingStats, getActiveCounts, getTweetProjection, getTweetProjectionByDate, captureHeroReplaySnapshot, getHeroReplayHistory, TrackingStats } from './services/polymarket';
+import { searchMarkets, parseBuckets, getTrackingStats, getActiveCounts, getTweetProjection, getTweetProjectionByDate, captureHeroReplaySnapshot, getHeroReplayHistory, getTokenQuotes, getElonPosts, type ElonPost, type ElonPostAuthor, TrackingStats } from './services/polymarket';
 import { motion, AnimatePresence } from 'motion/react';
 import { ArrowDown, ArrowLeft, Info, TrendingUp, Sun, Moon, Copy, RotateCw } from 'lucide-react';
 import { StatsModule } from './components/StatsModule';
@@ -22,60 +22,15 @@ const buildReplayCoordinationKey = (market: Pick<PolymarketEvent, 'id' | 'slug'>
   return `${market.id}::${market.slug ?? ''}`;
 };
 
-type XWidgetApi = {
-  widgets?: {
-    createTimeline: (
-      dataSource: { sourceType: 'profile'; screenName: string },
-      target: HTMLElement,
-      options?: Record<string, string | number | boolean>
-    ) => Promise<HTMLElement>;
-  };
+const ELON_POSTS_LIMIT = 12;
+const ELON_LOCAL_FALLBACK_AVATAR = '/avatars/elonmusk-fallback.svg';
+const DEFAULT_ELON_AUTHOR: ElonPostAuthor = {
+  name: 'Elon Musk',
+  handle: 'elonmusk',
+  avatarUrl: null,
 };
 
-type XWidgetWindow = Window & typeof globalThis & {
-  twttr?: XWidgetApi;
-};
-
-const X_WIDGETS_SCRIPT_SRC = 'https://platform.twitter.com/widgets.js';
-let xWidgetsScriptPromise: Promise<void> | null = null;
-
-const loadXWidgetsScript = async (): Promise<void> => {
-  if (typeof window === 'undefined') return;
-
-  const widgetWindow = window as XWidgetWindow;
-  if (widgetWindow.twttr?.widgets?.createTimeline) return;
-  if (xWidgetsScriptPromise) return xWidgetsScriptPromise;
-
-  xWidgetsScriptPromise = new Promise<void>((resolve, reject) => {
-    const existingScript = document.querySelector<HTMLScriptElement>(`script[src="${X_WIDGETS_SCRIPT_SRC}"]`);
-
-    if (existingScript) {
-      if (widgetWindow.twttr?.widgets?.createTimeline) {
-        resolve();
-        return;
-      }
-
-      existingScript.addEventListener('load', () => resolve(), { once: true });
-      existingScript.addEventListener('error', () => {
-        xWidgetsScriptPromise = null;
-        reject(new Error('Failed to load X timeline widget script.'));
-      }, { once: true });
-      return;
-    }
-
-    const script = document.createElement('script');
-    script.src = X_WIDGETS_SCRIPT_SRC;
-    script.async = true;
-    script.addEventListener('load', () => resolve(), { once: true });
-    script.addEventListener('error', () => {
-      xWidgetsScriptPromise = null;
-      reject(new Error('Failed to load X timeline widget script.'));
-    }, { once: true });
-    document.body.appendChild(script);
-  });
-
-  return xWidgetsScriptPromise;
-};
+type AvatarFallbackStage = 'remote' | 'local' | 'initials';
 
 export default function App() {
   const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
@@ -92,11 +47,16 @@ export default function App() {
   const [heroReplayHistory, setHeroReplayHistory] = useState<HeroReplayHistoryPayload | null>(null);
   const [heroReplayHistoryError, setHeroReplayHistoryError] = useState<string | null>(null);
   const [isHeroReplayHistoryLoading, setIsHeroReplayHistoryLoading] = useState(false);
-  const [isTimelineLoading, setIsTimelineLoading] = useState(false);
-  const [timelineError, setTimelineError] = useState<string | null>(null);
+  const [elonPosts, setElonPosts] = useState<ElonPost[]>([]);
+  const [isElonPostsLoading, setIsElonPostsLoading] = useState(false);
+  const [elonPostsError, setElonPostsError] = useState<string | null>(null);
+  const [elonPostsAuthor, setElonPostsAuthor] = useState<ElonPostAuthor | null>(null);
+  const [elonAuthorAvatarSrc, setElonAuthorAvatarSrc] = useState<string | null>(ELON_LOCAL_FALLBACK_AVATAR);
+  const [elonAuthorAvatarStage, setElonAuthorAvatarStage] = useState<AvatarFallbackStage>('local');
   const [heroReplayCoordinationKey, setHeroReplayCoordinationKey] = useState<string | null>(null);
   const [heroReplayHistoryVersion, setHeroReplayHistoryVersion] = useState(0);
   const [heroReplayLiveVersion, setHeroReplayLiveVersion] = useState(0);
+  const [bucketQuotes, setBucketQuotes] = useState<Record<string, { ask?: number; bid?: number; spread?: number }>>({});
   const [dark, setDark] = useState(false);
   const [copied, setCopied] = useState(false);
   const [nowMs, setNowMs] = useState(Date.now());
@@ -106,11 +66,9 @@ export default function App() {
   const autoRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedMarketRef = useRef<PolymarketEvent | null>(null);
   const strategySectionRef = useRef<HTMLDivElement | null>(null);
-  const timelineContainerRef = useRef<HTMLDivElement | null>(null);
   const refreshRequestIdRef = useRef(0);
   const replayHistoryRequestIdRef = useRef(0);
-  const timelineRequestIdRef = useRef(0);
-  const timelineTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const elonPostsRequestIdRef = useRef(0);
   const refreshInFlightRef = useRef(false);
 
   const TIPS_ADDRESS = '0x137789060E41030417b7835B6647EFe9b712F6F3';
@@ -129,9 +87,43 @@ export default function App() {
     document.documentElement.classList.toggle('dark', next);
   };
 
-  const buckets = useMemo(() => {
+  const parsedBuckets = useMemo(() => {
     return selectedMarket ? parseBuckets(selectedMarket) : [];
   }, [selectedMarket]);
+
+  const bucketQuotesRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    const requestId = ++bucketQuotesRequestIdRef.current;
+
+    if (parsedBuckets.length === 0) {
+      setBucketQuotes({});
+      return;
+    }
+
+    void (async () => {
+      const quotes = await getTokenQuotes(parsedBuckets.map(bucket => bucket.tokenId));
+      if (bucketQuotesRequestIdRef.current !== requestId) return;
+      setBucketQuotes(quotes);
+    })();
+  }, [parsedBuckets]);
+
+  const buckets = useMemo(() => {
+    return parsedBuckets.map((bucket) => {
+      const quote = bucketQuotes[bucket.tokenId];
+      const ask = quote?.ask;
+
+      if (ask === undefined || ask <= 0) {
+        return bucket;
+      }
+
+      return {
+        ...bucket,
+        price: ask,
+        spread: quote?.spread ?? bucket.spread,
+      };
+    });
+  }, [parsedBuckets, bucketQuotes]);
 
 
   const selectedBuckets = useMemo(() => {
@@ -153,63 +145,40 @@ export default function App() {
     setActiveCounts(counts);
   };
 
-  const clearTimelineTimeout = React.useCallback(() => {
-    if (timelineTimeoutRef.current !== null) {
-      clearTimeout(timelineTimeoutRef.current);
-      timelineTimeoutRef.current = null;
-    }
-  }, []);
+  const loadElonPostsForMarket = React.useCallback(async (market: { startDate?: string; endDate?: string } | null) => {
+    const requestId = ++elonPostsRequestIdRef.current;
 
-  const loadElonTimeline = React.useCallback(async () => {
-    const container = timelineContainerRef.current;
-    if (!container) return;
-
-    const requestId = ++timelineRequestIdRef.current;
-    setIsTimelineLoading(true);
-    setTimelineError(null);
-    clearTimelineTimeout();
-
-    while (container.firstChild) {
-      container.removeChild(container.firstChild);
+    if (!market) {
+      setElonPosts([]);
+      setElonPostsError(null);
+      setElonPostsAuthor(null);
+      setIsElonPostsLoading(false);
+      return;
     }
 
-    timelineTimeoutRef.current = window.setTimeout(() => {
-      if (timelineRequestIdRef.current !== requestId) return;
-      setIsTimelineLoading(false);
-      setTimelineError('Timeline is taking too long to load right now.');
-    }, 8000);
+    setIsElonPostsLoading(true);
+    setElonPostsError(null);
 
     try {
-      await loadXWidgetsScript();
-      const widgetWindow = window as XWidgetWindow;
-      const createTimeline = widgetWindow.twttr?.widgets?.createTimeline;
+      const response = await getElonPosts({
+        startDate: market.startDate,
+        endDate: market.endDate,
+        limit: ELON_POSTS_LIMIT,
+      });
 
-      if (!createTimeline) {
-        throw new Error('X timeline widget API unavailable.');
-      }
-
-      await createTimeline(
-        { sourceType: 'profile', screenName: 'elonmusk' },
-        container,
-        {
-          height: 560,
-          theme: dark ? 'dark' : 'light',
-          chrome: 'noheader nofooter noborders transparent',
-          dnt: true,
-        }
-      );
-
-      if (timelineRequestIdRef.current !== requestId) return;
-      clearTimelineTimeout();
-      setIsTimelineLoading(false);
+      if (elonPostsRequestIdRef.current !== requestId) return;
+      setElonPosts(response.items);
+      setElonPostsAuthor(response.author ?? DEFAULT_ELON_AUTHOR);
+      setIsElonPostsLoading(false);
     } catch (error) {
-      if (timelineRequestIdRef.current !== requestId) return;
-      clearTimelineTimeout();
-      setIsTimelineLoading(false);
-      setTimelineError('Could not load the @elonmusk timeline right now.');
-      console.error('Timeline widget load failed:', error);
+      if (elonPostsRequestIdRef.current !== requestId) return;
+      setIsElonPostsLoading(false);
+      setElonPosts([]);
+      setElonPostsAuthor(DEFAULT_ELON_AUTHOR);
+      setElonPostsError('Could not load posts for this market window right now.');
+      console.error('Elon posts load failed:', error);
     }
-  }, [clearTimelineTimeout, dark]);
+  }, []);
 
   React.useEffect(() => {
     loadActiveCounts();
@@ -380,30 +349,30 @@ export default function App() {
   }, [AUTO_REFRESH_INTERVAL_MS, AUTO_REFRESH_RETRY_DELAY_MS, clearAutoRefresh, refreshMarketData]);
 
   const selectedMarketId = selectedMarket?.id;
+  const selectedMarketWindow = useMemo(() => {
+    if (!selectedMarket) return null;
+
+    const rawStartDate = (selectedMarket as { startDate?: unknown }).startDate;
+    const startDate = typeof rawStartDate === 'string' ? rawStartDate : undefined;
+
+    return {
+      startDate,
+      endDate: selectedMarket.endDate,
+    };
+  }, [selectedMarket]);
 
   useEffect(() => {
-    if (!selectedMarketId) {
-      clearTimelineTimeout();
-      timelineRequestIdRef.current += 1;
-      setIsTimelineLoading(false);
-      setTimelineError(null);
-
-      const container = timelineContainerRef.current;
-      if (container) {
-        while (container.firstChild) {
-          container.removeChild(container.firstChild);
-        }
-      }
+    if (!selectedMarketWindow) {
+      elonPostsRequestIdRef.current += 1;
+      setElonPosts([]);
+      setElonPostsAuthor(null);
+      setElonPostsError(null);
+      setIsElonPostsLoading(false);
       return;
     }
 
-    void loadElonTimeline();
-
-    return () => {
-      timelineRequestIdRef.current += 1;
-      clearTimelineTimeout();
-    };
-  }, [clearTimelineTimeout, loadElonTimeline, selectedMarketId]);
+    void loadElonPostsForMarket(selectedMarketWindow);
+  }, [loadElonPostsForMarket, selectedMarketWindow]);
 
   useEffect(() => {
     if (!selectedMarketId) {
@@ -461,8 +430,11 @@ export default function App() {
     setProjectionInsufficient(null);
     setHeroReplayHistory(null);
     setHeroReplayHistoryError(null);
+    setElonPosts([]);
+    setElonPostsAuthor(null);
+    setElonPostsError(null);
 
-    await refreshMarketData(market, false);
+    await refreshMarketData(market, true);
   };
 
   const handleScrollToStrategy = () => {
@@ -544,6 +516,41 @@ export default function App() {
       detail: `${replayAvailability.snapshotCount} snapshots across ${replayHistorySpanDays.toFixed(1)} days. Replay is eligible.`,
     };
   })();
+
+  const formatPostTimestamp = (createdAt: string) => {
+    const timestamp = new Date(createdAt).getTime();
+    if (Number.isNaN(timestamp)) return 'Unknown date';
+    return new Date(timestamp).toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  const resolvedElonAuthor = elonPostsAuthor ?? DEFAULT_ELON_AUTHOR;
+
+  useEffect(() => {
+    if (resolvedElonAuthor.avatarUrl) {
+      setElonAuthorAvatarSrc(resolvedElonAuthor.avatarUrl);
+      setElonAuthorAvatarStage('remote');
+      return;
+    }
+
+    setElonAuthorAvatarSrc(ELON_LOCAL_FALLBACK_AVATAR);
+    setElonAuthorAvatarStage('local');
+  }, [resolvedElonAuthor.avatarUrl]);
+
+  const handleElonAvatarError = () => {
+    if (elonAuthorAvatarStage === 'remote') {
+      setElonAuthorAvatarSrc(ELON_LOCAL_FALLBACK_AVATAR);
+      setElonAuthorAvatarStage('local');
+      return;
+    }
+
+    setElonAuthorAvatarSrc(null);
+    setElonAuthorAvatarStage('initials');
+  };
 
   return (
     <div className="min-h-screen bg-bg">
@@ -918,49 +925,86 @@ export default function App() {
                         <div className="flex items-start justify-between gap-3">
                           <h4 className="font-mono text-[10px] uppercase tracking-[0.22em] opacity-55">Latest from @elonmusk</h4>
                           <span className="border border-ink/15 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.18em] text-ink/55">
-                            Official X embed
+                            Market window feed
                           </span>
                         </div>
 
-                        <div className="relative overflow-hidden border border-ink/10 bg-bg">
-                          {isTimelineLoading && (
-                            <div className="absolute inset-0 z-10 flex flex-col justify-center gap-3 bg-bg/95 px-4">
-                              <div className="h-4 w-40 animate-pulse bg-ink/10" />
-                              <div className="h-3 w-full animate-pulse bg-ink/8" />
-                              <div className="h-3 w-5/6 animate-pulse bg-ink/8" />
-                              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink/52">Loading @elonmusk timeline...</p>
-                            </div>
-                          )}
+                        {isElonPostsLoading ? (
+                          <div className="space-y-3 border border-ink/10 bg-ink/[0.02] px-4 py-4">
+                            <div className="h-3 w-28 animate-pulse bg-ink/10" />
+                            <div className="h-3 w-full animate-pulse bg-ink/8" />
+                            <div className="h-3 w-5/6 animate-pulse bg-ink/8" />
+                            <div className="h-3 w-4/5 animate-pulse bg-ink/8" />
+                          </div>
+                        ) : elonPostsError ? (
+                          <div className="space-y-3 border border-negative/30 bg-negative/10 px-4 py-4">
+                            <p className="text-sm text-negative">{elonPostsError}</p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void loadElonPostsForMarket(selectedMarketWindow);
+                              }}
+                              className="inline-flex min-h-10 w-full items-center justify-center border border-ink bg-ink px-3 py-2 font-mono text-[10px] uppercase tracking-[0.18em] text-bg transition-colors hover:bg-bg hover:text-ink focus:outline-none focus:ring-2 focus:ring-ink"
+                            >
+                              Retry feed
+                            </button>
+                          </div>
+                        ) : elonPosts.length === 0 ? (
+                          <div className="border border-ink/10 bg-ink/[0.02] px-4 py-4">
+                            <p className="text-sm text-ink/62">No posts were found in this market period.</p>
+                          </div>
+                        ) : (
+                          <div className="max-h-[560px] space-y-3 overflow-y-auto pr-1">
+                            {elonPosts.map((post) => (
+                              <article key={post.id} className="space-y-3 border border-ink/10 bg-gradient-to-b from-bg to-ink/[0.02] px-3.5 py-3.5 shadow-[0_10px_22px_-18px_rgba(20,20,20,0.55)]">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="flex min-w-0 items-center gap-2.5">
+                                    <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-ink/18 bg-ink/[0.08]">
+                                      {elonAuthorAvatarSrc ? (
+                                        <img
+                                          src={elonAuthorAvatarSrc}
+                                          alt={`${resolvedElonAuthor.name} profile avatar`}
+                                          className="h-full w-full object-cover"
+                                          loading="lazy"
+                                          onError={handleElonAvatarError}
+                                        />
+                                      ) : (
+                                        <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-ink/70">EM</span>
+                                      )}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="truncate text-sm font-semibold leading-none text-ink">{resolvedElonAuthor.name}</p>
+                                      <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.16em] text-ink/52">@{resolvedElonAuthor.handle}</p>
+                                    </div>
+                                  </div>
+                                  <span className="shrink-0 rounded-full border border-ink/14 bg-bg/90 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.14em] text-ink/56">
+                                    {formatPostTimestamp(post.createdAt)}
+                                  </span>
+                                </div>
 
-                          {timelineError ? (
-                            <div className="flex min-h-[560px] flex-col items-start justify-center gap-3 px-4 py-5">
-                              <p className="text-sm text-ink/65">{timelineError}</p>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  void loadElonTimeline();
-                                }}
-                                className="inline-flex min-h-9 items-center justify-center border border-ink/20 bg-bg px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-ink transition-colors hover:bg-ink hover:text-bg focus:outline-none focus:ring-2 focus:ring-ink"
-                              >
-                                Retry embed
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="h-[560px] overflow-y-auto">
-                              <div ref={timelineContainerRef} className="min-h-[560px] w-full" />
-                            </div>
-                          )}
+                                <div className="relative">
+                                  <p
+                                    className="overflow-hidden text-sm leading-6 text-ink/92"
+                                    style={{ display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical' }}
+                                  >
+                                    {post.text}
+                                  </p>
+                                  <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-7 bg-gradient-to-t from-bg via-bg/95 to-transparent" />
+                                </div>
 
-                          {!isTimelineLoading && !timelineError && (
-                            <div className="border-t border-ink/10 px-3 py-2 font-mono text-[9px] uppercase tracking-[0.16em] text-ink/45">
-                              If the embed is blocked, open <a href="https://x.com/elonmusk" target="_blank" rel="noopener noreferrer" className="underline underline-offset-3">x.com/elonmusk</a>
-                            </div>
-                          )}
-                        </div>
-
-                        {isTimelineLoading && (
-                          <div className="space-y-2 text-sm text-ink/58">
-                            <p>Pulling official timeline widget...</p>
+                                <div className="flex items-center justify-end border-t border-ink/10 pt-2">
+                                  <a
+                                    href={post.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-ink/20 bg-bg px-3 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-ink transition-colors hover:bg-ink hover:text-bg focus:outline-none focus:ring-2 focus:ring-ink"
+                                  >
+                                    Open on X
+                                    <span aria-hidden="true">↗</span>
+                                  </a>
+                                </div>
+                              </article>
+                            ))}
                           </div>
                         )}
                       </div>
