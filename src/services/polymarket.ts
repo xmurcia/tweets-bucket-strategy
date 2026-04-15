@@ -117,6 +117,26 @@ export function parseNumericField(value: unknown): number | undefined {
   return undefined;
 }
 
+function parseJsonStringArray(value: unknown): string[] | null {
+  if (typeof value !== 'string') return null;
+
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return null;
+
+    const normalized = parsed.map((item) => {
+      if (typeof item === 'string') return item;
+      if (typeof item === 'number' && Number.isFinite(item)) return String(item);
+      return null;
+    });
+
+    if (normalized.some((item) => item === null)) return null;
+    return normalized as string[];
+  } catch {
+    return null;
+  }
+}
+
 export async function getTokenQuotes(tokenIds: string[]): Promise<Record<string, TokenQuote>> {
   const uniqueTokenIds = Array.from(new Set(tokenIds.filter(Boolean)));
   if (uniqueTokenIds.length === 0) return {};
@@ -221,15 +241,32 @@ export async function getTrackingStats(trackingId: string): Promise<TrackingStat
 }
 
 export function parseBuckets(event: PolymarketEvent): Bucket[] {
-  try {
-    const allBuckets: Bucket[] = [];
-    
-    event.markets.forEach(market => {
-      if (market.closed) return;
-      
-      const outcomes = JSON.parse(market.outcomes);
-      const outcomePrices = JSON.parse(market.outcomePrices);
-      const tokenIds = JSON.parse(market.clobTokenIds);
+  const allBuckets: Bucket[] = [];
+
+  event.markets.forEach((market) => {
+    if (market.closed) return;
+
+    try {
+      const outcomes = parseJsonStringArray(market.outcomes);
+      const outcomePrices = parseJsonStringArray(market.outcomePrices);
+      const tokenIds = parseJsonStringArray(market.clobTokenIds);
+
+      if (!outcomes || !outcomePrices || !tokenIds) {
+        console.warn(`[parseBuckets] Skipping invalid market ${market.id}: malformed outcomes/outcomePrices/clobTokenIds`);
+        return;
+      }
+
+      if (
+        outcomes.length === 0 ||
+        outcomePrices.length === 0 ||
+        tokenIds.length === 0 ||
+        outcomes.length !== outcomePrices.length ||
+        outcomes.length !== tokenIds.length
+      ) {
+        console.warn(`[parseBuckets] Skipping invalid market ${market.id}: inconsistent outcome arrays`);
+        return;
+      }
+
       const marketBestAsk = parseNumericField(market.bestAsk);
       const marketBestBid = parseNumericField(market.bestBid);
       const marketSpread =
@@ -241,12 +278,12 @@ export function parseBuckets(event: PolymarketEvent): Bucket[] {
       // Extraemos el rango de la pregunta
       if (outcomes.length === 2 && outcomes.includes('Yes') && outcomes.includes('No')) {
         const yesIndex = outcomes.indexOf('Yes');
-        
+
         // Intentar extraer el rango de la pregunta (ej: "300-319" o "320+")
         const q = market.question;
         const rangeMatch = q.match(/(\d+)-(\d+)/);
         const plusMatch = q.match(/(\d+)\+/);
-        
+
         let bucketName: string;
         if (rangeMatch) {
           bucketName = rangeMatch[0];
@@ -262,11 +299,11 @@ export function parseBuckets(event: PolymarketEvent): Bucket[] {
           name: bucketName,
           price: marketBestAsk !== undefined && marketBestAsk > 0
             ? marketBestAsk
-            : parseFloat(outcomePrices[yesIndex] || '0'),
+            : parseNumericField(outcomePrices[yesIndex]) ?? 0,
           tokenId: tokenIds[yesIndex],
           spread: marketSpread,
         });
-      } 
+      }
       // Caso 2: Mercado categórico (múltiples outcomes en un solo mercado)
       else {
         outcomes.forEach((name: string, index: number) => {
@@ -275,23 +312,22 @@ export function parseBuckets(event: PolymarketEvent): Bucket[] {
             name,
             // Gamma only exposes market-level bestAsk, so for categorical outcomes
             // we keep per-outcome prices as fallback until per-outcome ask is available.
-            price: parseFloat(outcomePrices[index] || '0'),
+            price: parseNumericField(outcomePrices[index]) ?? 0,
             tokenId: tokenIds[index],
           });
         });
       }
-    });
+    } catch (error) {
+      console.warn(`[parseBuckets] Skipping invalid market ${market.id}:`, error);
+    }
+  });
 
-    // Ordenar buckets por el valor numérico inicial
-    return allBuckets.sort((a, b) => {
-      const valA = parseInt(a.name.match(/\d+/)?.[0] || '0');
-      const valB = parseInt(b.name.match(/\d+/)?.[0] || '0');
-      return valA - valB;
-    });
-  } catch (e) {
-    console.error('Error parsing buckets from event:', e);
-    return [];
-  }
+  // Ordenar buckets por el valor numérico inicial
+  return allBuckets.sort((a, b) => {
+    const valA = parseInt(a.name.match(/\d+/)?.[0] || '0');
+    const valB = parseInt(b.name.match(/\d+/)?.[0] || '0');
+    return valA - valB;
+  });
 }
 
 export async function getTweetProjection(trackingId: string): Promise<TweetProjection | ProjectionInsufficient | null> {
