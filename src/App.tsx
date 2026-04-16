@@ -31,11 +31,24 @@ const DEFAULT_ELON_AUTHOR: ElonPostAuthor = {
 };
 
 type AvatarFallbackStage = 'remote' | 'local' | 'initials';
+type TweetFeedMode = 'robust' | 'official-embed';
+type OfficialEmbedStatus = 'idle' | 'loading' | 'ready' | 'timeout' | 'error';
+
+type TwitterWidgetsApi = {
+  widgets?: {
+    load: (element?: Element | null) => Promise<void> | void;
+  };
+};
+
+type TwitterWindow = Window & typeof globalThis & {
+  twttr?: TwitterWidgetsApi;
+};
 
 export default function App() {
   const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
   const AUTO_REFRESH_RETRY_DELAY_MS = 10 * 1000;
   const MANUAL_REFRESH_COOLDOWN_MS = 20 * 1000;
+  const OFFICIAL_EMBED_TIMEOUT_MS = 5000;
 
   const [selectedMarket, setSelectedMarket] = useState<PolymarketEvent | null>(null);
   const [selectedBucketIds, setSelectedBucketIds] = useState<Set<string>>(new Set());
@@ -51,6 +64,9 @@ export default function App() {
   const [isElonPostsLoading, setIsElonPostsLoading] = useState(false);
   const [elonPostsError, setElonPostsError] = useState<string | null>(null);
   const [elonPostsAuthor, setElonPostsAuthor] = useState<ElonPostAuthor | null>(null);
+  const [tweetFeedMode, setTweetFeedMode] = useState<TweetFeedMode>('robust');
+  const [officialEmbedStatus, setOfficialEmbedStatus] = useState<OfficialEmbedStatus>('idle');
+  const [officialEmbedAttemptNonce, setOfficialEmbedAttemptNonce] = useState(0);
   const [elonAuthorAvatarSrc, setElonAuthorAvatarSrc] = useState<string | null>(ELON_LOCAL_FALLBACK_AVATAR);
   const [elonAuthorAvatarStage, setElonAuthorAvatarStage] = useState<AvatarFallbackStage>('local');
   const [heroReplayCoordinationKey, setHeroReplayCoordinationKey] = useState<string | null>(null);
@@ -66,6 +82,8 @@ export default function App() {
   const autoRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedMarketRef = useRef<PolymarketEvent | null>(null);
   const strategySectionRef = useRef<HTMLDivElement | null>(null);
+  const officialEmbedContainerRef = useRef<HTMLDivElement | null>(null);
+  const officialEmbedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshRequestIdRef = useRef(0);
   const replayHistoryRequestIdRef = useRef(0);
   const elonPostsRequestIdRef = useRef(0);
@@ -315,6 +333,13 @@ export default function App() {
     }
   }, []);
 
+  const clearOfficialEmbedTimeout = React.useCallback(() => {
+    if (officialEmbedTimeoutRef.current !== null) {
+      clearTimeout(officialEmbedTimeoutRef.current);
+      officialEmbedTimeoutRef.current = null;
+    }
+  }, []);
+
   const scheduleAutoRefresh = React.useCallback((delayMs = AUTO_REFRESH_INTERVAL_MS) => {
     clearAutoRefresh();
     const nextAt = Date.now() + delayMs;
@@ -368,11 +393,13 @@ export default function App() {
       setElonPostsAuthor(null);
       setElonPostsError(null);
       setIsElonPostsLoading(false);
+      setOfficialEmbedStatus('idle');
+      clearOfficialEmbedTimeout();
       return;
     }
 
     void loadElonPostsForMarket(selectedMarketWindow);
-  }, [loadElonPostsForMarket, selectedMarketWindow]);
+  }, [clearOfficialEmbedTimeout, loadElonPostsForMarket, selectedMarketWindow]);
 
   useEffect(() => {
     if (!selectedMarketId) {
@@ -433,6 +460,10 @@ export default function App() {
     setElonPosts([]);
     setElonPostsAuthor(null);
     setElonPostsError(null);
+    setTweetFeedMode('robust');
+    setOfficialEmbedStatus('idle');
+    setOfficialEmbedAttemptNonce(0);
+    clearOfficialEmbedTimeout();
 
     await refreshMarketData(market, true);
   };
@@ -551,6 +582,120 @@ export default function App() {
     setElonAuthorAvatarSrc(null);
     setElonAuthorAvatarStage('initials');
   };
+
+  const loadOfficialEmbedWidgets = React.useCallback(async () => {
+    const twitterWindow = window as TwitterWindow;
+    if (twitterWindow.twttr?.widgets?.load) {
+      await twitterWindow.twttr.widgets.load(officialEmbedContainerRef.current);
+      return;
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const existing = document.querySelector<HTMLScriptElement>('script[data-x-widgets="true"]');
+      if (existing) {
+        if (existing.dataset.loaded === 'true') {
+          resolve();
+          return;
+        }
+
+        existing.addEventListener('load', () => resolve(), { once: true });
+        existing.addEventListener('error', () => reject(new Error('Official embed script failed to load')), { once: true });
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.src = 'https://platform.twitter.com/widgets.js';
+      script.async = true;
+      script.defer = true;
+      script.dataset.xWidgets = 'true';
+      script.onload = () => {
+        script.dataset.loaded = 'true';
+        resolve();
+      };
+      script.onerror = () => reject(new Error('Official embed script failed to load'));
+      document.body.appendChild(script);
+    });
+
+    const reloadedWindow = window as TwitterWindow;
+    if (!reloadedWindow.twttr?.widgets?.load) {
+      throw new Error('Official embed widgets API unavailable');
+    }
+
+    await reloadedWindow.twttr.widgets.load(officialEmbedContainerRef.current);
+  }, []);
+
+  useEffect(() => {
+    clearOfficialEmbedTimeout();
+
+    if (tweetFeedMode !== 'official-embed') {
+      setOfficialEmbedStatus('idle');
+      return;
+    }
+
+    if (isElonPostsLoading || Boolean(elonPostsError) || elonPosts.length === 0) {
+      setOfficialEmbedStatus('idle');
+      return;
+    }
+
+    setOfficialEmbedStatus('loading');
+    officialEmbedTimeoutRef.current = window.setTimeout(() => {
+      setOfficialEmbedStatus((current) => (current === 'ready' ? current : 'timeout'));
+    }, OFFICIAL_EMBED_TIMEOUT_MS);
+
+    void loadOfficialEmbedWidgets().catch((error) => {
+      console.error('Official X embed load failed:', error);
+      setOfficialEmbedStatus('error');
+    });
+
+    return () => {
+      clearOfficialEmbedTimeout();
+    };
+  }, [
+    OFFICIAL_EMBED_TIMEOUT_MS,
+    clearOfficialEmbedTimeout,
+    elonPosts,
+    elonPostsError,
+    isElonPostsLoading,
+    loadOfficialEmbedWidgets,
+    officialEmbedAttemptNonce,
+    tweetFeedMode,
+  ]);
+
+  useEffect(() => {
+    if (tweetFeedMode !== 'official-embed' || officialEmbedStatus !== 'loading') {
+      return;
+    }
+
+    const container = officialEmbedContainerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const markReadyIfRendered = () => {
+      const hasRenderedIframe = Boolean(container.querySelector('iframe'));
+      if (!hasRenderedIframe) return;
+      clearOfficialEmbedTimeout();
+      setOfficialEmbedStatus('ready');
+    };
+
+    markReadyIfRendered();
+
+    const observer = new MutationObserver(() => {
+      markReadyIfRendered();
+    });
+
+    observer.observe(container, {
+      childList: true,
+      subtree: true,
+    });
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [clearOfficialEmbedTimeout, officialEmbedStatus, tweetFeedMode]);
+
+  const isOfficialEmbedFallback = tweetFeedMode === 'official-embed' && (officialEmbedStatus === 'timeout' || officialEmbedStatus === 'error');
+  const showRobustFeed = tweetFeedMode === 'robust' || isOfficialEmbedFallback;
 
   return (
     <div className="min-h-screen bg-bg">
@@ -922,11 +1067,39 @@ export default function App() {
                       />
 
                       <div className="space-y-3 border border-ink/10 bg-bg p-4">
-                        <div className="flex items-start justify-between gap-3">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
                           <h4 className="font-mono text-[10px] uppercase tracking-[0.22em] opacity-55">Latest from @elonmusk</h4>
-                          <span className="border border-ink/15 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.18em] text-ink/55">
-                            Market window feed
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setTweetFeedMode('robust')}
+                              className={`inline-flex min-h-8 items-center border px-2 py-1 font-mono text-[9px] uppercase tracking-[0.15em] transition-colors focus:outline-none focus:ring-2 focus:ring-ink ${tweetFeedMode === 'robust' ? 'border-ink bg-ink text-bg' : 'border-ink/15 text-ink/65 hover:border-ink hover:bg-ink hover:text-bg'}`}
+                            >
+                              Market window feed
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setTweetFeedMode('official-embed');
+                                setOfficialEmbedAttemptNonce((nonce) => nonce + 1);
+                              }}
+                              className={`inline-flex min-h-8 items-center border px-2 py-1 font-mono text-[9px] uppercase tracking-[0.15em] transition-colors focus:outline-none focus:ring-2 focus:ring-ink ${tweetFeedMode === 'official-embed' ? 'border-ink bg-ink text-bg' : 'border-ink/15 text-ink/65 hover:border-ink hover:bg-ink hover:text-bg'}`}
+                            >
+                              Official X embed
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className={`border px-3 py-2 font-mono text-[9px] uppercase tracking-[0.14em] ${isOfficialEmbedFallback ? 'border-warning/30 bg-warning/10 text-warning' : 'border-ink/12 bg-ink/[0.03] text-ink/62'}`}>
+                          {tweetFeedMode === 'robust'
+                            ? 'Mode: Market window feed (default)'
+                            : officialEmbedStatus === 'ready'
+                              ? 'Mode: Official X embed (opt-in)'
+                              : officialEmbedStatus === 'loading'
+                                ? 'Mode: Official X embed loading...'
+                                : isOfficialEmbedFallback
+                                  ? 'Official X embed unavailable, switched to market window feed.'
+                                  : 'Mode: Official X embed (opt-in)'}
                         </div>
 
                         {isElonPostsLoading ? (
@@ -954,58 +1127,101 @@ export default function App() {
                             <p className="text-sm text-ink/62">No posts were found in this market period.</p>
                           </div>
                         ) : (
-                          <div className="max-h-[560px] space-y-3 overflow-y-auto pr-1">
-                            {elonPosts.map((post) => (
-                              <article key={post.id} className="space-y-3 border border-ink/10 bg-gradient-to-b from-bg to-ink/[0.02] px-3.5 py-3.5 shadow-[0_10px_22px_-18px_rgba(20,20,20,0.55)]">
-                                <div className="flex items-start justify-between gap-3">
-                                  <div className="flex min-w-0 items-center gap-2.5">
-                                    <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-ink/18 bg-ink/[0.08]">
-                                      {elonAuthorAvatarSrc ? (
-                                        <img
-                                          src={elonAuthorAvatarSrc}
-                                          alt={`${resolvedElonAuthor.name} profile avatar`}
-                                          className="h-full w-full object-cover"
-                                          loading="lazy"
-                                          onError={handleElonAvatarError}
-                                        />
-                                      ) : (
-                                        <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-ink/70">EM</span>
-                                      )}
-                                    </div>
-                                    <div className="min-w-0">
-                                      <p className="truncate text-sm font-semibold leading-none text-ink">{resolvedElonAuthor.name}</p>
-                                      <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.16em] text-ink/52">@{resolvedElonAuthor.handle}</p>
-                                    </div>
-                                  </div>
-                                  <span className="shrink-0 rounded-full border border-ink/14 bg-bg/90 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.14em] text-ink/56">
-                                    {formatPostTimestamp(post.createdAt)}
+                          <>
+                            {tweetFeedMode === 'official-embed' && !isOfficialEmbedFallback && (
+                              <div className="space-y-3 border border-ink/10 bg-ink/[0.02] p-3">
+                                <div className="flex items-center justify-between gap-3">
+                                  <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink/62">
+                                    {officialEmbedStatus === 'ready' ? 'Official embed active' : 'Trying official embed (timeout 5s)'}
                                   </span>
-                                </div>
-
-                                <div className="relative">
-                                  <p
-                                    className="overflow-hidden text-sm leading-6 text-ink/92"
-                                    style={{ display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical' }}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOfficialEmbedStatus('idle');
+                                      setOfficialEmbedAttemptNonce((nonce) => nonce + 1);
+                                    }}
+                                    className="inline-flex min-h-7 items-center border border-ink/20 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.14em] text-ink/70 transition-colors hover:border-ink hover:bg-ink hover:text-bg focus:outline-none focus:ring-2 focus:ring-ink"
                                   >
-                                    {post.text}
-                                  </p>
-                                  <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-7 bg-gradient-to-t from-bg via-bg/95 to-transparent" />
+                                    Retry embed
+                                  </button>
                                 </div>
+                                <div ref={officialEmbedContainerRef} className="max-h-[560px] space-y-3 overflow-y-auto pr-1">
+                                  {elonPosts.slice(0, 4).map((post) => (
+                                    <article key={`embed-${post.id}`} className="border border-ink/10 bg-bg px-2 py-2">
+                                      <blockquote className="twitter-tweet" data-theme={dark ? 'dark' : 'light'} data-dnt="true" data-conversation="none">
+                                        <a href={post.url}>View post</a>
+                                      </blockquote>
+                                    </article>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
 
-                                <div className="flex items-center justify-end border-t border-ink/10 pt-2">
-                                  <a
-                                    href={post.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-ink/20 bg-bg px-3 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-ink transition-colors hover:bg-ink hover:text-bg focus:outline-none focus:ring-2 focus:ring-ink"
-                                  >
-                                    Open on X
-                                    <span aria-hidden="true">↗</span>
-                                  </a>
-                                </div>
-                              </article>
-                            ))}
-                          </div>
+                            {showRobustFeed && (
+                              <div className="max-h-[560px] space-y-3 overflow-y-auto pr-1">
+                                {elonPosts.map((post) => (
+                                  <article key={post.id} className="space-y-3 border border-ink/10 bg-gradient-to-b from-bg to-ink/[0.02] px-3.5 py-3.5 shadow-[0_10px_22px_-18px_rgba(20,20,20,0.55)]">
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div className="flex min-w-0 items-center gap-2.5">
+                                        <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-ink/18 bg-ink/[0.08]">
+                                          {elonAuthorAvatarSrc ? (
+                                            <img
+                                              src={elonAuthorAvatarSrc}
+                                              alt={`${resolvedElonAuthor.name} profile avatar`}
+                                              className="h-full w-full object-cover"
+                                              loading="lazy"
+                                              onError={handleElonAvatarError}
+                                            />
+                                          ) : (
+                                            <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-ink/70">EM</span>
+                                          )}
+                                        </div>
+                                        <div className="min-w-0">
+                                          <p className="truncate text-sm font-semibold leading-none text-ink">{resolvedElonAuthor.name}</p>
+                                          <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.16em] text-ink/52">@{resolvedElonAuthor.handle}</p>
+                                        </div>
+                                      </div>
+                                      <div className="flex shrink-0 items-center gap-2">
+                                        <span className="rounded-full border border-ink/14 bg-bg/90 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.14em] text-ink/56">
+                                          {formatPostTimestamp(post.createdAt)}
+                                        </span>
+                                        <a
+                                          href={post.url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          aria-label="Open post in X"
+                                          title="Open post in X"
+                                          className="inline-flex min-h-7 items-center gap-1 rounded-full border border-ink/20 bg-bg px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.14em] text-ink transition-colors hover:bg-ink hover:text-bg focus:outline-none focus:ring-2 focus:ring-ink"
+                                        >
+                                          X
+                                          <span aria-hidden="true">↗</span>
+                                        </a>
+                                      </div>
+                                    </div>
+
+                                    <div className="relative">
+                                      <p
+                                        className="overflow-hidden text-sm leading-6 text-ink/92"
+                                        style={{ display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical' }}
+                                      >
+                                        {post.text}
+                                      </p>
+                                      <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-7 bg-gradient-to-t from-bg via-bg/95 to-transparent" />
+                                    </div>
+
+                                    <div className="flex min-w-0 items-center border-t border-ink/10 pt-2">
+                                      <p
+                                        className="w-full truncate text-[11px] text-ink/62"
+                                        title="Open in X to review the full post context, media, and live replies."
+                                      >
+                                        Open in X to review the full post context, media, and live replies.
+                                      </p>
+                                    </div>
+                                  </article>
+                                ))}
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
 
