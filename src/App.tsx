@@ -29,6 +29,7 @@ type XWidgetApi = {
       target: HTMLElement,
       options?: Record<string, string | number | boolean>
     ) => Promise<HTMLElement>;
+    load: (target?: HTMLElement) => void;
   };
 };
 
@@ -39,23 +40,42 @@ type XWidgetWindow = Window & typeof globalThis & {
 const X_WIDGETS_SCRIPT_SRC = 'https://platform.twitter.com/widgets.js';
 let xWidgetsScriptPromise: Promise<void> | null = null;
 
+const waitForXWidgetsApi = async (): Promise<void> => {
+  if (typeof window === 'undefined') return;
+
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const widgets = (window as XWidgetWindow).twttr?.widgets;
+    if (widgets?.createTimeline || widgets?.load) return;
+    await new Promise(resolve => {
+      window.setTimeout(resolve, 100);
+    });
+  }
+
+  throw new Error('X timeline widget API unavailable.');
+};
+
 const loadXWidgetsScript = async (): Promise<void> => {
   if (typeof window === 'undefined') return;
 
   const widgetWindow = window as XWidgetWindow;
-  if (widgetWindow.twttr?.widgets?.createTimeline) return;
+  if (widgetWindow.twttr?.widgets?.createTimeline || widgetWindow.twttr?.widgets?.load) return;
   if (xWidgetsScriptPromise) return xWidgetsScriptPromise;
 
   xWidgetsScriptPromise = new Promise<void>((resolve, reject) => {
     const existingScript = document.querySelector<HTMLScriptElement>(`script[src="${X_WIDGETS_SCRIPT_SRC}"]`);
 
     if (existingScript) {
-      if (widgetWindow.twttr?.widgets?.createTimeline) {
+      if (widgetWindow.twttr?.widgets?.createTimeline || widgetWindow.twttr?.widgets?.load) {
         resolve();
         return;
       }
 
-      existingScript.addEventListener('load', () => resolve(), { once: true });
+      existingScript.addEventListener('load', () => {
+        void waitForXWidgetsApi().then(resolve).catch((error: unknown) => {
+          xWidgetsScriptPromise = null;
+          reject(error instanceof Error ? error : new Error('Failed to load X timeline widget script.'));
+        });
+      }, { once: true });
       existingScript.addEventListener('error', () => {
         xWidgetsScriptPromise = null;
         reject(new Error('Failed to load X timeline widget script.'));
@@ -66,7 +86,12 @@ const loadXWidgetsScript = async (): Promise<void> => {
     const script = document.createElement('script');
     script.src = X_WIDGETS_SCRIPT_SRC;
     script.async = true;
-    script.addEventListener('load', () => resolve(), { once: true });
+    script.addEventListener('load', () => {
+      void waitForXWidgetsApi().then(resolve).catch((error: unknown) => {
+        xWidgetsScriptPromise = null;
+        reject(error instanceof Error ? error : new Error('Failed to load X timeline widget script.'));
+      });
+    }, { once: true });
     script.addEventListener('error', () => {
       xWidgetsScriptPromise = null;
       reject(new Error('Failed to load X timeline widget script.'));
@@ -107,6 +132,7 @@ export default function App() {
   const selectedMarketRef = useRef<PolymarketEvent | null>(null);
   const strategySectionRef = useRef<HTMLDivElement | null>(null);
   const timelineContainerRef = useRef<HTMLDivElement | null>(null);
+  const [timelineContainerNode, setTimelineContainerNode] = useState<HTMLDivElement | null>(null);
   const refreshRequestIdRef = useRef(0);
   const replayHistoryRequestIdRef = useRef(0);
   const timelineRequestIdRef = useRef(0);
@@ -182,22 +208,33 @@ export default function App() {
     try {
       await loadXWidgetsScript();
       const widgetWindow = window as XWidgetWindow;
-      const createTimeline = widgetWindow.twttr?.widgets?.createTimeline;
+      const widgets = widgetWindow.twttr?.widgets;
 
-      if (!createTimeline) {
+      if (widgets?.createTimeline) {
+        await widgets.createTimeline(
+          { sourceType: 'profile', screenName: 'elonmusk' },
+          container,
+          {
+            height: 560,
+            theme: dark ? 'dark' : 'light',
+            chrome: 'noheader nofooter noborders transparent',
+            dnt: true,
+          }
+        );
+      } else if (widgets?.load) {
+        const anchor = document.createElement('a');
+        anchor.className = 'twitter-timeline';
+        anchor.href = 'https://twitter.com/elonmusk';
+        anchor.setAttribute('data-height', '560');
+        anchor.setAttribute('data-theme', dark ? 'dark' : 'light');
+        anchor.setAttribute('data-chrome', 'noheader nofooter noborders transparent');
+        anchor.setAttribute('data-dnt', 'true');
+        anchor.textContent = 'Tweets by @elonmusk';
+        container.appendChild(anchor);
+        widgets.load(container);
+      } else {
         throw new Error('X timeline widget API unavailable.');
       }
-
-      await createTimeline(
-        { sourceType: 'profile', screenName: 'elonmusk' },
-        container,
-        {
-          height: 560,
-          theme: dark ? 'dark' : 'light',
-          chrome: 'noheader nofooter noborders transparent',
-          dnt: true,
-        }
-      );
 
       if (timelineRequestIdRef.current !== requestId) return;
       clearTimelineTimeout();
@@ -211,8 +248,19 @@ export default function App() {
     }
   }, [clearTimelineTimeout, dark]);
 
+  const setTimelineContainerRef = React.useCallback((node: HTMLDivElement | null) => {
+    timelineContainerRef.current = node;
+    setTimelineContainerNode(node);
+  }, []);
+
   React.useEffect(() => {
     loadActiveCounts();
+  }, []);
+
+  useEffect(() => {
+    void loadXWidgetsScript().catch(error => {
+      console.error('X timeline widget bootstrap failed:', error);
+    });
   }, []);
 
   useEffect(() => {
@@ -397,13 +445,17 @@ export default function App() {
       return;
     }
 
+    if (!timelineContainerNode) {
+      return;
+    }
+
     void loadElonTimeline();
 
     return () => {
       timelineRequestIdRef.current += 1;
       clearTimelineTimeout();
     };
-  }, [clearTimelineTimeout, loadElonTimeline, selectedMarketId]);
+  }, [clearTimelineTimeout, loadElonTimeline, selectedMarketId, timelineContainerNode]);
 
   useEffect(() => {
     if (!selectedMarketId) {
@@ -947,7 +999,7 @@ export default function App() {
                             </div>
                           ) : (
                             <div className="h-[560px] overflow-y-auto">
-                              <div ref={timelineContainerRef} className="min-h-[560px] w-full" />
+                              <div ref={setTimelineContainerRef} className="min-h-[560px] w-full" />
                             </div>
                           )}
 
