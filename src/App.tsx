@@ -84,6 +84,7 @@ export default function App() {
   const strategySectionRef = useRef<HTMLDivElement | null>(null);
   const officialEmbedContainerRef = useRef<HTMLDivElement | null>(null);
   const officialEmbedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const officialEmbedWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshRequestIdRef = useRef(0);
   const replayHistoryRequestIdRef = useRef(0);
   const elonPostsRequestIdRef = useRef(0);
@@ -337,6 +338,13 @@ export default function App() {
     if (officialEmbedTimeoutRef.current !== null) {
       clearTimeout(officialEmbedTimeoutRef.current);
       officialEmbedTimeoutRef.current = null;
+    }
+  }, []);
+
+  const clearOfficialEmbedWatchdog = React.useCallback(() => {
+    if (officialEmbedWatchdogRef.current !== null) {
+      clearTimeout(officialEmbedWatchdogRef.current);
+      officialEmbedWatchdogRef.current = null;
     }
   }, []);
 
@@ -626,6 +634,7 @@ export default function App() {
 
   useEffect(() => {
     clearOfficialEmbedTimeout();
+    clearOfficialEmbedWatchdog();
 
     if (tweetFeedMode !== 'official-embed') {
       setOfficialEmbedStatus('idle');
@@ -649,9 +658,11 @@ export default function App() {
 
     return () => {
       clearOfficialEmbedTimeout();
+      clearOfficialEmbedWatchdog();
     };
   }, [
     OFFICIAL_EMBED_TIMEOUT_MS,
+    clearOfficialEmbedWatchdog,
     clearOfficialEmbedTimeout,
     elonPosts,
     elonPostsError,
@@ -672,15 +683,37 @@ export default function App() {
     }
 
     const markReadyIfRendered = () => {
-      const hasRenderedIframe = Boolean(container.querySelector('iframe'));
-      if (!hasRenderedIframe) return;
+      const hasLoadedIframe = Array.from(container.querySelectorAll('iframe')).some((iframe) => {
+        const embedIframe = iframe as HTMLIFrameElement;
+        const readyState = embedIframe.dataset.officialEmbedLoaded === 'true';
+        const withVisibleSurface = embedIframe.getBoundingClientRect().height > 80;
+        return readyState && withVisibleSurface;
+      });
+      if (!hasLoadedIframe) return;
       clearOfficialEmbedTimeout();
       setOfficialEmbedStatus('ready');
     };
 
+    const bindIframeLoadEvents = () => {
+      container.querySelectorAll('iframe').forEach((iframeNode) => {
+        const iframe = iframeNode as HTMLIFrameElement;
+        if (iframe.dataset.officialEmbedBound === 'true') return;
+        iframe.dataset.officialEmbedBound = 'true';
+
+        const markLoaded = () => {
+          iframe.dataset.officialEmbedLoaded = 'true';
+          markReadyIfRendered();
+        };
+
+        iframe.addEventListener('load', markLoaded, { once: true });
+      });
+    };
+
+    bindIframeLoadEvents();
     markReadyIfRendered();
 
     const observer = new MutationObserver(() => {
+      bindIframeLoadEvents();
       markReadyIfRendered();
     });
 
@@ -693,6 +726,36 @@ export default function App() {
       observer.disconnect();
     };
   }, [clearOfficialEmbedTimeout, officialEmbedStatus, tweetFeedMode]);
+
+  useEffect(() => {
+    clearOfficialEmbedWatchdog();
+
+    if (tweetFeedMode !== 'official-embed' || officialEmbedStatus !== 'ready') {
+      return;
+    }
+
+    officialEmbedWatchdogRef.current = window.setTimeout(() => {
+      const container = officialEmbedContainerRef.current;
+      if (!container) {
+        setOfficialEmbedStatus('timeout');
+        return;
+      }
+
+      const hasUsableIframe = Array.from(container.querySelectorAll('iframe')).some((iframeNode) => {
+        const iframe = iframeNode as HTMLIFrameElement;
+        const box = iframe.getBoundingClientRect();
+        return iframe.dataset.officialEmbedLoaded === 'true' && box.height > 120 && box.width > 120;
+      });
+
+      if (!hasUsableIframe) {
+        setOfficialEmbedStatus('timeout');
+      }
+    }, 1600);
+
+    return () => {
+      clearOfficialEmbedWatchdog();
+    };
+  }, [clearOfficialEmbedWatchdog, officialEmbedStatus, tweetFeedMode]);
 
   const isOfficialEmbedFallback = tweetFeedMode === 'official-embed' && (officialEmbedStatus === 'timeout' || officialEmbedStatus === 'error');
   const showRobustFeed = tweetFeedMode === 'robust' || isOfficialEmbedFallback;
