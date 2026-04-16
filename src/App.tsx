@@ -1129,7 +1129,8 @@ export default function App() {
                         onBudgetChange={setBudget}
                       />
 
-                      <div className="space-y-3 border border-ink/10 bg-bg p-4">
+                      {!(import.meta as ImportMeta & { env: { PROD: boolean } }).env.PROD && (
+                        <div className="space-y-3 border border-ink/10 bg-bg p-4">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <h4 className="font-mono text-[10px] uppercase tracking-[0.22em] opacity-55">Latest from @elonmusk</h4>
                           <div className="flex items-center gap-2">
@@ -1286,7 +1287,8 @@ export default function App() {
                             )}
                           </>
                         )}
-                      </div>
+                        </div>
+                      )}
 
                       <div className="space-y-4 border border-ink/10 bg-ink/[0.03] p-5">
                         <div>
